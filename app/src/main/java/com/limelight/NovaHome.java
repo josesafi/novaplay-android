@@ -145,8 +145,12 @@ public class NovaHome extends Activity {
         e.setHint(hint);
         e.setHintTextColor(MIST);
         e.setTextColor(FROST);
-        e.setInputType(type);
         e.setSingleLine(true);
+        // el tipo va DESPUES de setSingleLine: setSingleLine quita el ocultamiento y la contrasena se veia (16-nov-2026)
+        e.setInputType(type);
+        if ((type & InputType.TYPE_TEXT_VARIATION_PASSWORD) == InputType.TYPE_TEXT_VARIATION_PASSWORD) {
+            e.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());
+        }
         e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         e.setBackground(box(CARD, 14, Color.parseColor("#26FFFFFF")));
         e.setPadding(dp(16), dp(14), dp(16), dp(14));
