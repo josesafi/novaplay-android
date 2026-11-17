@@ -284,4 +284,14 @@
             android:summary="@string/summary_privacy_policy"
             url="https://moonlight-stream.org/privacy.html"/>
     </PreferenceCategory-->
+    <PreferenceCategory android:title="Acerca de Nova Play" android:key="category_about">
+        <com.limelight.preferences.WebLauncherPreference
+            android:title="Ayuda y soporte"
+            android:summary="Guías y contacto en novawebcolombia.com"
+            url="https://novawebcolombia.com/nova-play.html#ayuda"/>
+        <com.limelight.preferences.WebLauncherPreference
+            android:title="Licencias de software libre"
+            android:summary="Nova Play incluye componentes bajo la licencia GPLv3 (proyecto Moonlight). Toca para ver el código fuente."
+            url="https://github.com/josesafi/novaplay-android"/>
+    </PreferenceCategory>
 </PreferenceScreen>

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Nova Play: colores de la marca -->
+    <color name="nova_night">#06070F</color>
+    <color name="nova_ink">#0D1022</color>
+    <color name="nova_card">#121530</color>
+    <color name="nova_violet">#9B4DFF</color>
+    <color name="nova_lilac">#B98AFF</color>
+    <color name="nova_frost">#EEF0FA</color>
+    <color name="nova_mist">#8D93B0</color>
+</resources>

@@ -1,9 +1,6 @@
-<vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="512dp"
-    android:height="512dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
-    <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M21,2L3,2c-1.1,0 -2,0.9 -2,2v12c0,1.1 0.9,2 2,2h7v2L8,20v2h8v-2h-2v-2h7c1.1,0 2,-0.9 2,-2L23,4c0,-1.1 -0.9,-2 -2,-2zM21,16L3,16L3,4h18v12z" />
-</vector>
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nova Play: consola = la N de la marca sobre un circulo -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item><shape android:shape="oval"><gradient android:type="radial" android:gradientRadius="62dp" android:startColor="#559B4DFF" android:endColor="#00000000" /></shape></item>
+    <item android:drawable="@drawable/novaplay_n" android:top="22dp" android:bottom="22dp" android:left="22dp" android:right="22dp" />
+</layer-list>

@@ -38,14 +38,14 @@ public class HelpLauncher {
     }
 
     public static void launchSetupGuide(Context context) {
-        launchUrl(context, "https://github.com/moonlight-stream/moonlight-docs/wiki/Setup-Guide");
+        launchUrl(context, "https://novawebcolombia.com/nova-play.html#ayuda");
     }
 
     public static void launchTroubleshooting(Context context) {
-        launchUrl(context, "https://github.com/moonlight-stream/moonlight-docs/wiki/Troubleshooting");
+        launchUrl(context, "https://novawebcolombia.com/nova-play.html#ayuda");
     }
 
     public static void launchGameStreamEolFaq(Context context) {
-        launchUrl(context, "https://github.com/moonlight-stream/moonlight-docs/wiki/NVIDIA-GameStream-End-Of-Service-Announcement-FAQ");
+        launchUrl(context, "https://novawebcolombia.com/nova-play.html#ayuda");
     }
 }

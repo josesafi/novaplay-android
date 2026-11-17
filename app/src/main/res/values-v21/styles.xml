@@ -6,9 +6,17 @@
         res/values-v21/styles.xml on API 21+ devices.
     -->
     <style name="AppBaseTheme" parent="android:Theme.Material">
+        <item name="android:colorPrimary">@color/nova_ink</item>
+        <item name="android:colorPrimaryDark">@color/nova_night</item>
+        <item name="android:colorAccent">@color/nova_violet</item>
+        <item name="android:colorControlActivated">@color/nova_violet</item>
+        <item name="android:colorBackground">@color/nova_night</item>
+        <item name="android:windowBackground">@drawable/nova_bg</item>
+        <item name="android:textColorPrimary">@color/nova_frost</item>
+        <item name="android:textColorSecondary">@color/nova_mist</item>
         <!-- API 21 theme customizations can go here. -->
-        <item name="android:statusBarColor">#212121</item>
-        <item name="android:navigationBarColor">#212121</item>
+        <item name="android:statusBarColor">#06070F</item>
+        <item name="android:navigationBarColor">#06070F</item>
     </style>
 
 </resources>

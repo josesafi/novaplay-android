@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nova Play: tarjeta de consola o de juego (se ilumina al tocarla o al elegirla con el mando) -->
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:state_pressed="true"><shape><solid android:color="#2A1A5E" /><corners android:radius="18dp" /><stroke android:width="2dp" android:color="#9B4DFF" /></shape></item>
+    <item android:state_focused="true"><shape><solid android:color="#221A4A" /><corners android:radius="18dp" /><stroke android:width="2dp" android:color="#B98AFF" /></shape></item>
+    <item android:state_selected="true"><shape><solid android:color="#221A4A" /><corners android:radius="18dp" /><stroke android:width="2dp" android:color="#B98AFF" /></shape></item>
+    <item><shape><solid android:color="#B30D1022" /><corners android:radius="18dp" /><stroke android:width="1dp" android:color="#1FFFFFFF" /></shape></item>
+</selector>
