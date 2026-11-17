@@ -45,8 +45,9 @@ jobs:
           KEYSTORE_B64: ${{ secrets.NOVAPLAY_DEBUG_KEYSTORE }}
         run: |
           mkdir -p ~/.android
-          echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
-          ls -la ~/.android/debug.keystore
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/novaplay-debug.keystore"
+          keytool -list -keystore "$RUNNER_TEMP/novaplay-debug.keystore" -storepass android | grep -i sha
+          echo "NOVA_KEYSTORE=$RUNNER_TEMP/novaplay-debug.keystore" >> "$GITHUB_ENV"
 
       - name: Compilar APK
         run: ./gradlew --no-daemon assembleNonRootDebug
