@@ -1070,6 +1070,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             InputManager inputManager = (InputManager) getSystemService(Context.INPUT_SERVICE);
             inputManager.unregisterInputDeviceListener(keyboardTranslator);
         }
+        // controles en pantalla automaticos: dejar de escuchar los mandos al cerrar el juego
+        ((InputManager) getSystemService(Context.INPUT_SERVICE)).unregisterInputDeviceListener(oscGamepadListener);
 
         if (lowLatencyWifiLock != null) {
             lowLatencyWifiLock.release();
