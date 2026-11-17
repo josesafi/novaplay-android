@@ -511,6 +511,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     this);
             virtualController.refreshLayout();
             virtualController.show();
+            // Nova Play: si ya hay un mando conectado, los controles en pantalla no hacen falta
+            if (prefConfig.onscreenAuto) {
+                updateOscForGamepads();
+                ((InputManager) getSystemService(Context.INPUT_SERVICE)).registerInputDeviceListener(oscGamepadListener, null);
+            }
         }
 
         if (prefConfig.usbDriver) {
@@ -574,6 +579,28 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         }
     }
 
+    // ---- Nova Play: controles en pantalla automaticos (se ocultan con un mando conectado y vuelven al quitarlo)
+    private boolean oscHiddenByGamepad;
+    private final InputManager.InputDeviceListener oscGamepadListener = new InputManager.InputDeviceListener() {
+        @Override public void onInputDeviceAdded(int deviceId) { updateOscForGamepads(); }
+        @Override public void onInputDeviceRemoved(int deviceId) { updateOscForGamepads(); }
+        @Override public void onInputDeviceChanged(int deviceId) { updateOscForGamepads(); }
+    };
+
+    private void updateOscForGamepads() {
+        if (virtualController == null) return;
+        boolean hasPad = ControllerHandler.getAttachedControllerMask(this) != 0;
+        if (hasPad == oscHiddenByGamepad) return;
+        oscHiddenByGamepad = hasPad;
+        if (isHidingOverlays) return; // en PiP siguen ocultos; al salir se aplica este estado
+        if (hasPad) {
+            virtualController.hide();
+            Toast.makeText(this, "Mando conectado: ocultamos los controles en pantalla", Toast.LENGTH_SHORT).show();
+        } else {
+            virtualController.show();
+        }
+    }
+
     @Override
     public void onConfigurationChanged(Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
@@ -609,7 +636,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
                 // Restore overlays to previous state when leaving PiP
 
-                if (virtualController != null) {
+                if (virtualController != null && !oscHiddenByGamepad) {
                     virtualController.show();
                 }
 

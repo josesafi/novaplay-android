@@ -148,10 +148,16 @@
     <PreferenceCategory android:title="@string/category_on_screen_controls_settings"
         android:key="category_onscreen_controls">
         <CheckBoxPreference
-            android:defaultValue="false"
+            android:defaultValue="true"
             android:key="checkbox_show_onscreen_controls"
             android:summary="@string/summary_checkbox_show_onscreen_controls"
             android:title="@string/title_checkbox_show_onscreen_controls" />
+        <CheckBoxPreference
+            android:defaultValue="true"
+            android:key="checkbox_onscreen_auto"
+            android:dependency="checkbox_show_onscreen_controls"
+            android:title="Ocultarlos al conectar un mando"
+            android:summary="Los controles en pantalla desaparecen solos cuando conectas un mando (Bluetooth o USB) y vuelven al quitarlo" />
         <CheckBoxPreference
             android:key="checkbox_vibrate_osc"
             android:dependency="checkbox_show_onscreen_controls"

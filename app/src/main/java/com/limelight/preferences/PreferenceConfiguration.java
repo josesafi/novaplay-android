@@ -82,7 +82,10 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_USB_DRIVER = true;
     private static final String DEFAULT_VIDEO_FORMAT = "auto";
 
-    private static final boolean ONSCREEN_CONTROLLER_DEFAULT = false;
+    // Nova Play: encendidos por defecto en equipos con pantalla tactil (celular, tablet); se ocultan solos con un mando (OSC_AUTO)
+    private static final boolean ONSCREEN_CONTROLLER_DEFAULT = true;
+    private static final String OSC_AUTO_PREF_STRING = "checkbox_onscreen_auto";
+    private static final boolean OSC_AUTO_DEFAULT = true;
     private static final boolean ONLY_L3_R3_DEFAULT = false;
     private static final boolean SHOW_GUIDE_BUTTON_DEFAULT = true;
     private static final boolean DEFAULT_ENABLE_HDR = false;
@@ -131,6 +134,8 @@ public class PreferenceConfiguration {
     public String language;
     public boolean smallIconMode, multiController, usbDriver, flipFaceButtons;
     public boolean onscreenController;
+    /** ocultar los controles en pantalla mientras haya un mando conectado */
+    public boolean onscreenAuto;
     public boolean onlyL3R3;
     public boolean showGuideButton;
     public boolean enableHdr;
@@ -578,7 +583,9 @@ public class PreferenceConfiguration {
         config.smallIconMode = prefs.getBoolean(SMALL_ICONS_PREF_STRING, getDefaultSmallMode(context));
         config.multiController = prefs.getBoolean(MULTI_CONTROLLER_PREF_STRING, DEFAULT_MULTI_CONTROLLER);
         config.usbDriver = prefs.getBoolean(USB_DRIVER_PREF_SRING, DEFAULT_USB_DRIVER);
-        config.onscreenController = prefs.getBoolean(ONSCREEN_CONTROLLER_PREF_STRING, ONSCREEN_CONTROLLER_DEFAULT);
+        config.onscreenController = prefs.getBoolean(ONSCREEN_CONTROLLER_PREF_STRING, ONSCREEN_CONTROLLER_DEFAULT)
+                && context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
+        config.onscreenAuto = prefs.getBoolean(OSC_AUTO_PREF_STRING, OSC_AUTO_DEFAULT);
         config.onlyL3R3 = prefs.getBoolean(ONLY_L3_R3_PREF_STRING, ONLY_L3_R3_DEFAULT);
         config.showGuideButton = prefs.getBoolean(SHOW_GUIDE_BUTTON_PREF_STRING, SHOW_GUIDE_BUTTON_DEFAULT);
         config.enableHdr = prefs.getBoolean(ENABLE_HDR_PREF_STRING, DEFAULT_ENABLE_HDR) && !isShieldAtvFirmwareWithBrokenHdr();
