@@ -21,6 +21,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -109,12 +110,36 @@ public class NovaHome extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         api = NovaApi.get(this);
-        getWindow().setStatusBarColor(NIGHT);
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(NIGHT);
+        loadFonts();
+        FrameLayout frame = new FrameLayout(this);
+        frame.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.parseColor("#1B1240"), Color.parseColor("#0B0A1E"), NIGHT, NIGHT}));
+        // brillo morado de la marca arriba a la derecha
+        View glow = new View(this);
+        GradientDrawable g = new GradientDrawable();
+        g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+        g.setColors(new int[]{Color.parseColor("#559B4DFF"), Color.TRANSPARENT});
+        g.setGradientRadius(dp(260));
+        glow.setBackground(g);
+        FrameLayout.LayoutParams lpGlow = new FrameLayout.LayoutParams(dp(520), dp(520));
+        lpGlow.gravity = Gravity.TOP | Gravity.END;
+        lpGlow.topMargin = -dp(260);
+        lpGlow.rightMargin = -dp(220);
+        frame.addView(glow, lpGlow);
         root = new ScrollView(this);
         root.setFillViewport(true);
-        root.setBackgroundColor(NIGHT);
-        setContentView(root);
+        root.setClipToPadding(false);
+        frame.addView(root, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        // el contenido arranca debajo de la barra de estado (hora, bateria) y termina encima de la barra de navegacion
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            v.setPadding(insets.getSystemWindowInsetLeft(), insets.getSystemWindowInsetTop(),
+                    insets.getSystemWindowInsetRight(), insets.getSystemWindowInsetBottom());
+            return insets;
+        });
+        setContentView(frame);
+        frame.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
         bindService(new Intent(this, ComputerManagerService.class), serviceConnection, Service.BIND_AUTO_CREATE);
         show();
     }
@@ -148,12 +173,38 @@ public class NovaHome extends Activity {
         return (int) TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
     }
 
+    private Typeface sora = Typeface.DEFAULT;
+    private Typeface soraSemi = Typeface.DEFAULT_BOLD;
+    private Typeface soraBold = Typeface.DEFAULT_BOLD;
+
+    // Sora (la de la marca) es variable: en Android 8+ se pide cada grosor; en los viejos se usa normal y negrita simulada
+    private void loadFonts() {
+        try {
+            if (Build.VERSION.SDK_INT >= 26) {
+                sora = new Typeface.Builder(getAssets(), "sora.ttf").setFontVariationSettings("'wght' 400").build();
+                soraSemi = new Typeface.Builder(getAssets(), "sora.ttf").setFontVariationSettings("'wght' 600").build();
+                soraBold = new Typeface.Builder(getAssets(), "sora.ttf").setFontVariationSettings("'wght' 700").build();
+            } else {
+                sora = Typeface.createFromAsset(getAssets(), "sora.ttf");
+                soraSemi = Typeface.create(sora, Typeface.BOLD);
+                soraBold = soraSemi;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private TextView text(String s, float sp, int color, boolean bold) {
         TextView t = new TextView(this);
         t.setText(s);
         t.setTextSize(TypedValue.COMPLEX_UNIT_SP, sp);
         t.setTextColor(color);
-        if (bold) t.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        t.setTypeface(bold ? soraBold : sora);
+        return t;
+    }
+
+    private TextView semi(String s, float sp, int color) {
+        TextView t = text(s, sp, color, false);
+        t.setTypeface(soraSemi);
         return t;
     }
 
@@ -170,7 +221,7 @@ public class NovaHome extends Activity {
         b.setText(label);
         b.setAllCaps(false);
         b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        b.setTypeface(soraSemi);
         b.setTextColor(primary ? Color.WHITE : FROST);
         b.setBackground(primary ? box(VIOLET, 26, 0) : box(Color.TRANSPARENT, 26, Color.parseColor("#33FFFFFF")));
         b.setPadding(dp(22), 0, dp(22), 0);
@@ -191,6 +242,7 @@ public class NovaHome extends Activity {
             e.setTransformationMethod(android.text.method.PasswordTransformationMethod.getInstance());
         }
         e.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        e.setTypeface(sora);
         e.setBackground(box(CARD, 14, Color.parseColor("#26FFFFFF")));
         e.setPadding(dp(16), dp(14), dp(16), dp(14));
         return e;
@@ -261,6 +313,7 @@ public class NovaHome extends Activity {
         card.addView(loginError, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 12));
 
         loginButton = button("Entrar", true);
+        loginButton.setBackground(gradient(26));
         loginButton.setOnClickListener(v -> submit());
         card.addView(loginButton, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(52), 18));
         loginSpinner = new ProgressBar(this);
@@ -500,19 +553,33 @@ public class NovaHome extends Activity {
     private void showHome() {
         homeBox = new LinearLayout(this);
         homeBox.setOrientation(LinearLayout.VERTICAL);
-        homeBox.setPadding(dp(22), dp(28), dp(22), dp(28));
+        homeBox.setPadding(dp(20), dp(14), dp(20), dp(24));
         root.addView(homeBox, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
         renderHome();
     }
 
-    private LinearLayout stat(String k, String v) {
+    private GradientDrawable gradient(float radiusDp) {
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT,
+                new int[]{Color.parseColor("#8A3DF5"), Color.parseColor("#A95CFF")});
+        g.setCornerRadius(dp(radiusDp));
+        return g;
+    }
+
+    // dato compacto (saldo, tiempo, paquete): tres en una fila
+    private LinearLayout stat(String k, String v, int accent) {
         LinearLayout c = new LinearLayout(this);
         c.setOrientation(LinearLayout.VERTICAL);
-        c.setPadding(dp(18), dp(14), dp(18), dp(14));
-        c.setBackground(box(INK, 18, Color.parseColor("#14FFFFFF")));
-        c.addView(text(k, 13, MIST, false));
-        TextView val = text(v, 22, FROST, true);
-        c.addView(val, lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 4));
+        c.setPadding(dp(12), dp(12), dp(10), dp(12));
+        c.setBackground(box(Color.parseColor("#B30D1022"), 16, Color.parseColor("#1AFFFFFF")));
+        View bar = new View(this);
+        bar.setBackground(box(accent, 2, 0));
+        c.addView(bar, new LinearLayout.LayoutParams(dp(18), dp(3)));
+        TextView key = text(k, 11, MIST, false);
+        key.setLetterSpacing(0.04f);
+        c.addView(key, lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 8));
+        TextView val = text(v, 15, FROST, true);
+        val.setMaxLines(1);
+        c.addView(val, lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 3));
         return c;
     }
 
@@ -520,12 +587,26 @@ public class NovaHome extends Activity {
         if (homeBox == null || !api.isLoggedIn()) return;
         homeBox.removeAllViews();
 
+        // cabecera: logo a la izquierda, inicial del usuario a la derecha
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
         ImageView logo = new ImageView(this);
         logo.setImageResource(R.drawable.novaplay_logo);
         logo.setAdjustViewBounds(true);
-        homeBox.addView(logo, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(26)));
+        logo.setScaleType(ImageView.ScaleType.FIT_START);
+        head.addView(logo, new LinearLayout.LayoutParams(0, dp(24), 1f));
+        String first = api.getFirstName();
+        String email = api.getEmail();
+        String initial = !first.isEmpty() ? first.substring(0, 1) : !email.isEmpty() ? email.substring(0, 1) : "N";
+        TextView avatar = text(initial.toUpperCase(), 15, Color.WHITE, true);
+        avatar.setGravity(Gravity.CENTER);
+        GradientDrawable av = gradient(20);
+        av.setShape(GradientDrawable.OVAL);
+        avatar.setBackground(av);
+        head.addView(avatar, new LinearLayout.LayoutParams(dp(38), dp(38)));
+        homeBox.addView(head, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(44), 4));
 
-        homeBox.addView(text(greeting(), 28, FROST, true), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 24));
+        homeBox.addView(text(greeting(), 26, FROST, true), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 22));
         homeBox.addView(text("Tu PC gamer en la nube, lista cuando la necesites.", 14, MIST, false), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 4));
 
         if (play == null) {
@@ -536,36 +617,60 @@ public class NovaHome extends Activity {
             homeBox.addView(p, lpP);
         } else {
             long pkg = play.optLong("packageMinutesLeft");
-            homeBox.addView(stat("Saldo", money(play.optLong("balanceMinor"))), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 20));
-            homeBox.addView(stat("Tiempo de juego disponible", hm(play.optLong("minutesAffordable"))), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 10));
-            homeBox.addView(stat("Horas de paquete", pkg > 0 ? hm(pkg) : "Sin paquete"), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 10));
+            LinearLayout stats = new LinearLayout(this);
+            LinearLayout.LayoutParams c1 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+            LinearLayout.LayoutParams c2 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+            c2.leftMargin = dp(8);
+            LinearLayout.LayoutParams c3 = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+            c3.leftMargin = dp(8);
+            stats.addView(stat("SALDO", money(play.optLong("balanceMinor")), VIOLET), c1);
+            stats.addView(stat("PARA JUGAR", hm(play.optLong("minutesAffordable")), ELECTRIC), c2);
+            stats.addView(stat("PAQUETE", pkg > 0 ? hm(pkg) : "Sin paquete", OK), c3);
+            homeBox.addView(stats, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 20));
 
             // la consola del jugador
+            homeBox.addView(semi("Tu consola", 16, FROST), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 26));
             LinearLayout card = new LinearLayout(this);
             card.setOrientation(LinearLayout.VERTICAL);
             card.setGravity(Gravity.CENTER_HORIZONTAL);
-            card.setPadding(dp(22), dp(24), dp(22), dp(24));
-            card.setBackground(box(INK, 24, Color.parseColor("#14FFFFFF")));
-            homeBox.addView(card, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 18));
+            card.setPadding(dp(20), dp(22), dp(20), dp(20));
+            GradientDrawable cardBg = new GradientDrawable(GradientDrawable.Orientation.TL_BR,
+                    new int[]{Color.parseColor("#2A1A5E"), Color.parseColor("#141433"), INK});
+            cardBg.setCornerRadius(dp(26));
+            cardBg.setStroke(dp(1), Color.parseColor("#339B4DFF"));
+            card.setBackground(cardBg);
+            homeBox.addView(card, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 10));
 
+            // la N de la marca sobre un halo morado
+            FrameLayout halo = new FrameLayout(this);
+            View ring = new View(this);
+            GradientDrawable rg = new GradientDrawable();
+            rg.setGradientType(GradientDrawable.RADIAL_GRADIENT);
+            rg.setColors(new int[]{Color.parseColor("#669B4DFF"), Color.TRANSPARENT});
+            rg.setGradientRadius(dp(70));
+            ring.setBackground(rg);
+            halo.addView(ring, new FrameLayout.LayoutParams(dp(140), dp(140)));
             ImageView n = new ImageView(this);
             n.setImageResource(R.drawable.novaplay_n);
-            card.addView(n, new LinearLayout.LayoutParams(dp(120), dp(120)));
+            FrameLayout.LayoutParams lpN = new FrameLayout.LayoutParams(dp(92), dp(92));
+            lpN.gravity = Gravity.CENTER;
+            halo.addView(n, lpN);
+            card.addView(halo, new LinearLayout.LayoutParams(dp(140), dp(140)));
 
             boolean starting = waking || connecting || (myHost != null && myHost.optBoolean("starting"));
             boolean online = myHost != null && myHost.optBoolean("online");
             boolean asleep = myHost != null && myHost.optBoolean("asleep");
             boolean canStart = play.optBoolean("canStart");
 
-            TextView label = text(myHost != null ? "Tu consola" : "Sin consola disponible", 13, MIST, false);
-            label.setGravity(Gravity.CENTER);
-            card.addView(label, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 14));
-            TextView name = text(myHost != null ? myHost.optString("name") : "Nova Play", 26, FROST, true);
+            TextView name = text(myHost != null ? myHost.optString("name") : "Sin consola disponible", 24, FROST, true);
             name.setGravity(Gravity.CENTER);
             card.addView(name, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 2));
 
+            // estado en una pastilla
             LinearLayout state = new LinearLayout(this);
             state.setGravity(Gravity.CENTER);
+            state.setPadding(dp(14), dp(8), dp(14), dp(8));
+            state.setBackground(box(Color.parseColor("#14FFFFFF"), 20, 0));
             if (starting) {
                 state.addView(new ProgressBar(this), new LinearLayout.LayoutParams(dp(22), dp(22)));
             } else {
@@ -581,9 +686,12 @@ public class NovaHome extends Activity {
                     : starting ? "Encendiendo tu consola… estará lista en 20 a 30 segundos."
                     : online ? "Encendida y lista para jugar"
                     : asleep ? "Apagada para ahorrar energía" : "Sin conexión en este momento", 14, FROST, false);
-            st.setPadding(dp(10), 0, 0, 0);
+            st.setPadding(dp(8), 0, 0, 0);
+            st.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
             state.addView(st);
-            card.addView(state, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 10));
+            LinearLayout.LayoutParams lpState = lp(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, 10);
+            lpState.gravity = Gravity.CENTER_HORIZONTAL;
+            card.addView(state, lpState);
 
             if (!canStart) {
                 TextView w = text("Necesitas tiempo de juego: recarga tu saldo o compra un paquete en novawebcolombia.com.", 13, WARN, false);
@@ -600,11 +708,14 @@ public class NovaHome extends Activity {
             boolean enabled = myHost != null && canStart && !starting && (online || asleep);
             main.setEnabled(enabled);
             main.setAlpha(enabled ? 1f : 0.45f);
+            main.setBackground(gradient(27));
+            main.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+            main.setElevation(dp(6));
             main.setOnClickListener(v -> {
                 if (myHost != null && myHost.optBoolean("online")) startPlay();
                 else wake();
             });
-            card.addView(main, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(54), 18));
+            card.addView(main, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(54), 20));
 
             Button consoles = button("Mis consolas", false);
             consoles.setOnClickListener(v -> startActivity(new Intent(this, PcView.class)));
@@ -625,6 +736,6 @@ public class NovaHome extends Activity {
             showLogin();
         });
         foot.addView(out);
-        homeBox.addView(foot, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 22));
+        homeBox.addView(foot, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 26));
     }
 }
