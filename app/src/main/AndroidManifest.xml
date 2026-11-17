@@ -96,6 +96,15 @@
             <meta-data android:name="WindowManagerPreference:FreeformWindowSize" android:value="system-default" />
             <meta-data android:name="WindowManagerPreference:FreeformWindowOrientation" android:value="landscape" />
 
+        </activity>
+        <!-- Nova Play: pantalla de inicio propia (inicio de sesion con la cuenta de NovaWeb, saldo y consola); la lista de
+             equipos (PcView) queda como «Mis consolas» -->
+        <activity
+            android:name=".NovaHome"
+            android:exported="true"
+            android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
 
