@@ -152,6 +152,10 @@ public class NetProbe {
             listener.onPhase(PHASE_BANDWIDTH);
             r.mbps = bandwidth();
             if (cancelled.get()) return;
+            if (r.mbps < 0.1) {
+                listener.onError("No pudimos medir la velocidad de descarga: la conexión con el servidor de pruebas se cortó. Inténtalo de nuevo en un momento.");
+                return;
+            }
             listener.onProgress(1f);
             listener.onDone(r);
         } catch (Exception e) {
