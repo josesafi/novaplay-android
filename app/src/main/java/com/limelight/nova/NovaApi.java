@@ -216,6 +216,11 @@ public class NovaApi {
         });
     }
 
+    /** POST en el hilo actual (para usar desde un hilo de trabajo). Devuelve {status, cuerpo}. */
+    public Object[] postNow(String path, JSONObject body) {
+        return call("POST", path, body == null ? new JSONObject() : body, true);
+    }
+
     public void get(final String path, final Callback cb) {
         pool.execute(() -> {
             Object[] r = call("GET", path, null, true);

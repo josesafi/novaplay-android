@@ -1,7 +1,12 @@
 package com.limelight;
 
 import android.app.Activity;
+import android.app.Service;
+import android.content.ComponentName;
 import android.content.Intent;
+import android.content.ServiceConnection;
+import android.os.Build;
+import android.os.IBinder;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -23,7 +28,13 @@ import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.limelight.binding.PlatformBinding;
+import com.limelight.computers.ComputerManagerService;
 import com.limelight.nova.NovaApi;
+import com.limelight.nvstream.http.ComputerDetails;
+import com.limelight.nvstream.http.NvHTTP;
+import com.limelight.nvstream.http.PairingManager;
+import com.limelight.utils.ServerHelper;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -67,6 +78,24 @@ public class NovaHome extends Activity {
     private String wakeError = "";
     private LinearLayout homeBox;
 
+    // «Jugar» de un toque: el servicio de equipos de Moonlight (agregar, emparejar) y el estado de la conexion
+    private ComputerManagerService.ComputerManagerBinder managerBinder;
+    private boolean connecting;
+    private String connectMsg = "";
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
+        public void onServiceConnected(ComponentName className, IBinder binder) {
+            final ComputerManagerService.ComputerManagerBinder local = (ComputerManagerService.ComputerManagerBinder) binder;
+            new Thread(() -> {
+                local.waitForReady();
+                managerBinder = local;
+            }).start();
+        }
+
+        public void onServiceDisconnected(ComponentName className) {
+            managerBinder = null;
+        }
+    };
+
     private final Runnable poll = new Runnable() {
         @Override
         public void run() {
@@ -86,7 +115,17 @@ public class NovaHome extends Activity {
         root.setFillViewport(true);
         root.setBackgroundColor(NIGHT);
         setContentView(root);
+        bindService(new Intent(this, ComputerManagerService.class), serviceConnection, Service.BIND_AUTO_CREATE);
         show();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        try {
+            unbindService(serviceConnection);
+        } catch (Exception ignored) {
+        }
     }
 
     @Override
@@ -369,6 +408,95 @@ public class NovaHome extends Activity {
         });
     }
 
+    private void setConnect(String msg) {
+        ui.post(() -> {
+            connectMsg = msg;
+            renderHome();
+        });
+    }
+
+    /**
+     * «Jugar»: agrega la consola por su direccion publica, la primera vez empareja este celular sin codigos (el codigo se registra en
+     * la cuenta por la API y el agente de la consola lo confirma) y abre la lista de apps de la consola.
+     */
+    private void startPlay() {
+        if (managerBinder == null) {
+            wakeError = "Nova Play se está preparando. Inténtalo de nuevo en unos segundos.";
+            renderHome();
+            return;
+        }
+        final String address = myHost.optString("publicHost");
+        final String hostId = myHost.optString("id");
+        connecting = true;
+        connectMsg = "Conectando con tu consola…";
+        wakeError = "";
+        renderHome();
+        new Thread(() -> {
+            String err = null;
+            ComputerDetails computer = null;
+            try {
+                String host = address;
+                int port = NvHTTP.DEFAULT_HTTP_PORT;
+                int colon = address.lastIndexOf(':');
+                if (colon > 0 && address.indexOf(':') == colon) {
+                    host = address.substring(0, colon);
+                    try {
+                        port = Integer.parseInt(address.substring(colon + 1));
+                    } catch (NumberFormatException ignored) {
+                    }
+                }
+                ComputerDetails details = new ComputerDetails();
+                details.manualAddress = new ComputerDetails.AddressTuple(host, port);
+                if (!managerBinder.addComputerBlocking(details)) {
+                    err = "No pudimos conectar con tu consola. Revisa tu internet e inténtalo de nuevo.";
+                } else {
+                    computer = managerBinder.getComputer(details.uuid);
+                    if (computer == null) computer = details;
+                    NvHTTP http = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer), computer.httpsPort,
+                            managerBinder.getUniqueId(), computer.serverCert, PlatformBinding.getCryptoProvider(NovaHome.this));
+                    if (http.getPairState() != PairingManager.PairState.PAIRED) {
+                        setConnect("Preparando tu celular para jugar (solo la primera vez)…");
+                        String pin = PairingManager.generatePinString();
+                        JSONObject body = new JSONObject().put("hostId", hostId).put("pin", pin).put("name", "Nova Play " + Build.MODEL);
+                        Object[] r = api.postNow("/api/v1/accounts/" + accountId + "/play/devices", body);
+                        int status = (Integer) r[0];
+                        if (status != 200 && status != 201) {
+                            err = NovaApi.errorMessage(status, r[1]);
+                        } else {
+                            PairingManager pm = http.getPairingManager();
+                            PairingManager.PairState st = pm.pair(http.getServerInfo(true), pin);
+                            if (st == PairingManager.PairState.PAIRED) {
+                                ComputerDetails stored = managerBinder.getComputer(computer.uuid);
+                                if (stored != null) stored.serverCert = pm.getPairedCert();
+                                managerBinder.invalidateStateForComputer(computer.uuid);
+                            } else {
+                                err = "No se pudo emparejar tu celular con la consola. Inténtalo de nuevo en un minuto.";
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                err = "No pudimos conectar con tu consola. Inténtalo de nuevo.";
+            }
+            final String fe = err;
+            final ComputerDetails fc = computer;
+            ui.post(() -> {
+                connecting = false;
+                if (fe != null || fc == null) {
+                    wakeError = fe != null ? fe : "No pudimos conectar con tu consola.";
+                    renderHome();
+                    return;
+                }
+                renderHome();
+                Intent i = new Intent(NovaHome.this, AppView.class);
+                i.putExtra(AppView.NAME_EXTRA, fc.name);
+                i.putExtra(AppView.UUID_EXTRA, fc.uuid);
+                i.putExtra(AppView.NEW_PAIR_EXTRA, true);
+                startActivity(i);
+            });
+        }).start();
+    }
+
     private void showHome() {
         homeBox = new LinearLayout(this);
         homeBox.setOrientation(LinearLayout.VERTICAL);
@@ -424,7 +552,7 @@ public class NovaHome extends Activity {
             n.setImageResource(R.drawable.novaplay_n);
             card.addView(n, new LinearLayout.LayoutParams(dp(120), dp(120)));
 
-            boolean starting = waking || (myHost != null && myHost.optBoolean("starting"));
+            boolean starting = waking || connecting || (myHost != null && myHost.optBoolean("starting"));
             boolean online = myHost != null && myHost.optBoolean("online");
             boolean asleep = myHost != null && myHost.optBoolean("asleep");
             boolean canStart = play.optBoolean("canStart");
@@ -449,6 +577,7 @@ public class NovaHome extends Activity {
                 state.addView(dot, new LinearLayout.LayoutParams(dp(10), dp(10)));
             }
             TextView st = text(myHost == null ? "Escríbenos a soporte para asignarte una consola."
+                    : connecting ? connectMsg
                     : starting ? "Encendiendo tu consola… estará lista en 20 a 30 segundos."
                     : online ? "Encendida y lista para jugar"
                     : asleep ? "Apagada para ahorrar energía" : "Sin conexión en este momento", 14, FROST, false);
@@ -472,7 +601,7 @@ public class NovaHome extends Activity {
             main.setEnabled(enabled);
             main.setAlpha(enabled ? 1f : 0.45f);
             main.setOnClickListener(v -> {
-                if (myHost != null && myHost.optBoolean("online")) startActivity(new Intent(this, PcView.class));
+                if (myHost != null && myHost.optBoolean("online")) startPlay();
                 else wake();
             });
             card.addView(main, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(54), 18));
