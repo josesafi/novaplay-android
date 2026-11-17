@@ -99,6 +99,11 @@
         </activity>
         <!-- Nova Play: pantalla de inicio propia (inicio de sesion con la cuenta de NovaWeb, saldo y consola); la lista de
              equipos (PcView) queda como «Mis consolas» -->
+        <!-- Nova Play: «Prueba de red» (ancho de banda, perdida, latencia y variacion contra el servidor junto a las consolas) -->
+        <activity
+            android:name=".NetTestActivity"
+            android:exported="false"
+            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection" />
         <activity
             android:name=".NovaHome"
             android:exported="true"

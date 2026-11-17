@@ -717,9 +717,25 @@ public class NovaHome extends Activity {
             });
             card.addView(main, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(54), 20));
 
+            // «Prueba de red» y «Mis consolas» lado a lado
+            LinearLayout more = new LinearLayout(this);
+            Button net = button("Prueba de red", false);
+            net.setOnClickListener(v -> {
+                Intent i = new Intent(this, NetTestActivity.class);
+                String addr = myHost != null ? myHost.optString("publicHost") : "";
+                int colon = addr.lastIndexOf(':');
+                if (colon > 0 && addr.indexOf(':') == colon) addr = addr.substring(0, colon);
+                if (!addr.isEmpty()) i.putExtra(NetTestActivity.HOST_EXTRA, addr);
+                startActivity(i);
+            });
             Button consoles = button("Mis consolas", false);
             consoles.setOnClickListener(v -> startActivity(new Intent(this, PcView.class)));
-            card.addView(consoles, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(50), 10));
+            LinearLayout.LayoutParams half = new LinearLayout.LayoutParams(0, dp(50), 1f);
+            LinearLayout.LayoutParams half2 = new LinearLayout.LayoutParams(0, dp(50), 1f);
+            half2.leftMargin = dp(10);
+            more.addView(net, half);
+            more.addView(consoles, half2);
+            card.addView(more, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 10));
         }
 
         LinearLayout foot = new LinearLayout(this);
