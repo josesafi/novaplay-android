@@ -3,6 +3,7 @@ package com.limelight.binding.audio;
 import android.content.Context;
 import android.content.Intent;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
@@ -10,15 +11,38 @@ import android.media.audiofx.AudioEffect;
 import android.os.Build;
 
 import com.limelight.LimeLog;
+import com.limelight.nova.NovaStreamPanel;
 import com.limelight.nvstream.av.audio.AudioRenderer;
 import com.limelight.nvstream.jni.MoonBridge;
 
-public class AndroidAudioRenderer implements AudioRenderer {
+public class AndroidAudioRenderer implements AudioRenderer, NovaStreamPanel.NovaAudioControl {
 
     private final Context context;
     private final boolean enableAudioFx;
 
-    private AudioTrack track;
+    private volatile AudioTrack track;
+
+    // Nova Play: salida, volumen y silencio que se cambian en vivo desde el panel «Ajustes de la transmisión»
+    private AudioDeviceInfo preferredDevice;
+    private float gameVolume = 1f;
+    private boolean muted;
+
+    private void applyNova(AudioTrack t) {
+        if (t == null) return;
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) t.setPreferredDevice(preferredDevice);
+            t.setVolume(muted ? 0f : gameVolume);
+        } catch (Exception e) {
+            LimeLog.warning("Nova Play: no se pudo aplicar el sonido elegido: " + e);
+        }
+    }
+
+    @Override public synchronized void setPreferredDevice(AudioDeviceInfo device) { preferredDevice = device; applyNova(track); }
+    @Override public AudioDeviceInfo getPreferredDevice() { return preferredDevice; }
+    @Override public synchronized void setGameVolume(float volume) { gameVolume = Math.max(0f, Math.min(1f, volume)); applyNova(track); }
+    @Override public float getGameVolume() { return gameVolume; }
+    @Override public synchronized void setMuted(boolean m) { muted = m; applyNova(track); }
+    @Override public boolean isMuted() { return muted; }
 
     public AndroidAudioRenderer(Context context, boolean enableAudioFx) {
         this.context = context;
@@ -160,6 +184,7 @@ public class AndroidAudioRenderer implements AudioRenderer {
 
             try {
                 track = createAudioTrack(channelConfig, sampleRate, bufferSize, lowLatency);
+                applyNova(track);
                 track.play();
 
                 // Successfully created working AudioTrack. We're done here.

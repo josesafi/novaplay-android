@@ -30,6 +30,7 @@ import com.limelight.nvstream.jni.MoonBridge;
 import com.limelight.preferences.GlPreferences;
 import com.limelight.preferences.PreferenceConfiguration;
 import com.limelight.ui.GameGestures;
+import com.limelight.nova.NovaStreamPanel;
 import com.limelight.ui.StreamView;
 import com.limelight.utils.Dialog;
 import com.limelight.utils.ServerHelper;
@@ -92,7 +93,7 @@ import java.util.Locale;
 
 public class Game extends Activity implements SurfaceHolder.Callback,
         OnGenericMotionListener, OnTouchListener, NvConnectionListener, EvdevListener,
-        OnSystemUiVisibilityChangeListener, GameGestures, StreamView.InputCallbacks,
+        OnSystemUiVisibilityChangeListener, GameGestures, StreamView.InputCallbacks, NovaStreamPanel.Host,
         PerfOverlayListener, UsbDriverService.UsbDriverStateListener, View.OnKeyListener {
     private int lastButtonState = 0;
 
@@ -182,6 +183,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     public static final String EXTRA_PC_NAME = "PcName";
     public static final String EXTRA_APP_HDR = "HDR";
     public static final String EXTRA_SERVER_CERT = "ServerCert";
+    /** Nova Play: la actividad viene de «Aplicar y reconectar» del panel de ajustes (misma consola, nueva calidad). */
+    public static final String EXTRA_NOVA_RECONNECT = "NovaReconnect";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -214,8 +217,13 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         setContentView(R.layout.activity_game);
 
         // Start the spinner
-        spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
-                getResources().getString(R.string.conn_establishing_msg), true);
+        if (getIntent().getBooleanExtra(EXTRA_NOVA_RECONNECT, false)) {
+            spinner = SpinnerDialog.displayDialog(this, "Reconectando…",
+                    "Tu juego sigue abierto. Aplicando la nueva calidad de video…", true);
+        } else {
+            spinner = SpinnerDialog.displayDialog(this, getResources().getString(R.string.conn_establishing_title),
+                    getResources().getString(R.string.conn_establishing_msg), true);
+        }
 
         // Read the stream preferences
         prefConfig = PreferenceConfiguration.readPreferences(this);
@@ -680,6 +688,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         novaBar.setBackground(bb);
         novaBar.setVisibility(View.GONE);
         Object[][] items = {
+                {"⚙ Ajustes", (Runnable) this::toggleNovaPanel},
                 {"⌨  Teclado", (Runnable) this::toggleKeyboard},
                 {"🎮 Controles en pantalla", (Runnable) this::toggleOsc},
                 {"Esc", (Runnable) () -> novaKey(KeyEvent.KEYCODE_ESCAPE)},
@@ -739,6 +748,99 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                 return false;
             }
         });
+    }
+
+    // ---------------------------------------------------------------- Nova Play: panel «Ajustes de la transmisión»
+    private NovaStreamPanel novaPanel;
+    private AndroidAudioRenderer novaAudioRenderer;
+    private final android.os.Handler novaComboHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private boolean novaSelectDown, novaStartDown;
+    private final Runnable novaComboOpen = () -> { if (novaSelectDown && novaStartDown) toggleNovaPanel(); };
+
+    private void toggleNovaPanel() {
+        if (novaBar != null) novaBar.setVisibility(View.GONE);
+        if (novaPanel == null) novaPanel = new NovaStreamPanel(this, this);
+        novaPanel.toggle((FrameLayout) streamView.getParent());
+    }
+
+    @Override public boolean isOscVisible() { return virtualController != null && oscVisible; }
+
+    @Override public boolean isTrackpadMode() { return prefConfig.touchscreenTrackpad; }
+
+    @Override
+    public void setTrackpadMode(boolean trackpad) {
+        if (prefConfig.touchscreenTrackpad == trackpad) return;
+        prefConfig.touchscreenTrackpad = trackpad;
+        android.preference.PreferenceManager.getDefaultSharedPreferences(this).edit().putBoolean("checkbox_touchscreen_trackpad", trackpad).apply();
+        for (int i = 0; i < touchContextMap.length; i++) {
+            if (touchContextMap[i] != null) touchContextMap[i].cancelTouch();
+            touchContextMap[i] = trackpad
+                    ? new RelativeTouchContext(conn, i, REFERENCE_HORIZ_RES, REFERENCE_VERT_RES, streamView, prefConfig)
+                    : new AbsoluteTouchContext(conn, i, streamView);
+        }
+    }
+
+    @Override public boolean isStatsVisible() { return prefConfig.enablePerfOverlay; }
+
+    @Override
+    public void setStatsVisible(boolean visible) {
+        prefConfig.enablePerfOverlay = visible;
+        android.preference.PreferenceManager.getDefaultSharedPreferences(this).edit().putBoolean("checkbox_enable_perf_overlay", visible).apply();
+        performanceOverlayView.setVisibility(visible ? View.VISIBLE : View.GONE);
+    }
+
+    @Override public void showKeyboard() { toggleKeyboard(); }
+
+    @Override public NovaStreamPanel.NovaAudioControl audio() { return novaAudioRenderer; }
+
+    /** Vuelve a conectar con la MISMA consola y la calidad nueva: se corta esta transmision (sin cerrar el juego alla) y se abre otra. */
+    @Override
+    public void reconnect() {
+        displayedFailureDialog = true; // el corte es a proposito: sin avisos de «conexion terminada»
+        stopConnection();
+        Intent again = new Intent(getIntent());
+        again.putExtra(EXTRA_NOVA_RECONNECT, true);
+        again.addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION);
+        startActivity(again);
+        finish();
+        overridePendingTransition(0, 0);
+    }
+
+    /** El panel se navega con el mando (B cierra, A elige) y, abierto, las teclas no llegan al juego. Select+Start 1 s lo abre. */
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        int code = event.getKeyCode();
+        boolean pad = ControllerHandler.isGameControllerDevice(event.getDevice());
+        if (pad && (code == KeyEvent.KEYCODE_BUTTON_SELECT || code == KeyEvent.KEYCODE_BUTTON_START || code == KeyEvent.KEYCODE_BACK)) {
+            boolean down = event.getAction() == KeyEvent.ACTION_DOWN;
+            if (code == KeyEvent.KEYCODE_BUTTON_START) novaStartDown = down; else novaSelectDown = down;
+            novaComboHandler.removeCallbacks(novaComboOpen);
+            if (novaSelectDown && novaStartDown && event.getRepeatCount() == 0) novaComboHandler.postDelayed(novaComboOpen, 1000);
+        }
+        if (novaPanel != null && novaPanel.isShowing()) {
+            if (code == KeyEvent.KEYCODE_BUTTON_B || code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
+                if (event.getAction() == KeyEvent.ACTION_UP) novaPanel.close();
+                return true;
+            }
+            if (code == KeyEvent.KEYCODE_BUTTON_A) {
+                event = new KeyEvent(event.getDownTime(), event.getEventTime(), event.getAction(), KeyEvent.KEYCODE_DPAD_CENTER,
+                        event.getRepeatCount(), event.getMetaState(), event.getDeviceId(), event.getScanCode(), event.getFlags(), event.getSource());
+            }
+            // solo las vistas del panel: nada se manda al juego mientras esta abierto
+            novaPanel.ensureFocus();
+            getWindow().superDispatchKeyEvent(event);
+            return true;
+        }
+        return super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(MotionEvent event) {
+        if (novaPanel != null && novaPanel.isShowing() && (event.getSource() & InputDevice.SOURCE_JOYSTICK) == InputDevice.SOURCE_JOYSTICK) {
+            // sin pasar por el juego: Android convierte la cruceta/palanca en flechas para moverse por el panel
+            return getWindow().superDispatchGenericMotionEvent(event);
+        }
+        return super.dispatchGenericMotionEvent(event);
     }
 
     private void updateOscForGamepads() {
@@ -2700,8 +2802,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             UiHelper.notifyStreamConnecting(Game.this);
 
             decoderRenderer.setRenderTarget(holder);
-            conn.start(new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx),
-                    decoderRenderer, Game.this);
+            novaAudioRenderer = new AndroidAudioRenderer(Game.this, prefConfig.enableAudioFx);
+            conn.start(novaAudioRenderer, decoderRenderer, Game.this);
         }
     }
 

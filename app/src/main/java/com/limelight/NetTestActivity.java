@@ -332,6 +332,9 @@ public class NetTestActivity extends Activity implements NetProbe.Listener {
         int gJit = NetProbe.gradeLow(r.jitterMs, NetProbe.JITTER_REQUIRED, NetProbe.JITTER_RECOMMENDED);
         int worst = Math.min(Math.min(gBw, gLoss), Math.min(gLat, gJit));
         int[] q = NetProbe.recommendedQuality(r);
+        // el panel «Ajustes de la transmisión» ofrece esta calidad («Usar lo recomendado por mi red»)
+        PreferenceManager.getDefaultSharedPreferences(this).edit().putString(com.limelight.nova.NovaStreamPanel.NET_RECOMMENDED_PREF,
+                q == null ? "" : q[0] + "x" + q[1] + "|" + q[2] + "|" + q[3]).apply();
         String what = worst == 2 ? "Tu red está lista para jugar" : worst == 1 ? "Tu red sirve para jugar" : "Tu red no alcanza para jugar bien";
         StringBuilder why = new StringBuilder();
         if (worst == 2) why.append("Excelente conexión: disfruta tus juegos con la mejor calidad.");
