@@ -82,10 +82,12 @@ public class PreferenceConfiguration {
     private static final boolean DEFAULT_USB_DRIVER = true;
     private static final String DEFAULT_VIDEO_FORMAT = "auto";
 
-    // Nova Play: encendidos por defecto en equipos con pantalla tactil (celular, tablet); se ocultan solos con un mando (OSC_AUTO)
-    private static final boolean ONSCREEN_CONTROLLER_DEFAULT = true;
+    // Nova Play (18-nov-2026, pedido del dueno): los controles en pantalla NO salen solos al jugar. Se encienden a mano desde la «N» de
+    // la barra flotante («Controles en pantalla») o desde Ajustes. OSC_DEFAULT_V2 apaga una sola vez lo que traian las versiones anteriores.
+    private static final boolean ONSCREEN_CONTROLLER_DEFAULT = false;
     private static final String OSC_AUTO_PREF_STRING = "checkbox_onscreen_auto";
-    private static final boolean OSC_AUTO_DEFAULT = true;
+    private static final boolean OSC_AUTO_DEFAULT = false;
+    private static final String OSC_DEFAULT_V2 = "osc_default_v2";
     private static final boolean ONLY_L3_R3_DEFAULT = false;
     private static final boolean SHOW_GUIDE_BUTTON_DEFAULT = true;
     private static final boolean DEFAULT_ENABLE_HDR = false;
@@ -583,6 +585,9 @@ public class PreferenceConfiguration {
         config.smallIconMode = prefs.getBoolean(SMALL_ICONS_PREF_STRING, getDefaultSmallMode(context));
         config.multiController = prefs.getBoolean(MULTI_CONTROLLER_PREF_STRING, DEFAULT_MULTI_CONTROLLER);
         config.usbDriver = prefs.getBoolean(USB_DRIVER_PREF_SRING, DEFAULT_USB_DRIVER);
+        if (!prefs.getBoolean(OSC_DEFAULT_V2, false)) {
+            prefs.edit().putBoolean(ONSCREEN_CONTROLLER_PREF_STRING, false).putBoolean(OSC_AUTO_PREF_STRING, false).putBoolean(OSC_DEFAULT_V2, true).apply();
+        }
         config.onscreenController = prefs.getBoolean(ONSCREEN_CONTROLLER_PREF_STRING, ONSCREEN_CONTROLLER_DEFAULT)
                 && context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
         config.onscreenAuto = prefs.getBoolean(OSC_AUTO_PREF_STRING, OSC_AUTO_DEFAULT);

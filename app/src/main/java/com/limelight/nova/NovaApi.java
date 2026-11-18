@@ -59,6 +59,10 @@ public class NovaApi {
     private String firstName;
     private String email;
     private String challenge;
+    /** Codigo del ultimo error del inicio de sesion (p. ej. EMAIL_VERIFICATION_REQUIRED). */
+    private volatile String lastErrorCode = "";
+
+    public String lastErrorCode() { return lastErrorCode == null ? "" : lastErrorCode; }
 
     private NovaApi(Context context) {
         prefs = context.getSharedPreferences("novaplay", Context.MODE_PRIVATE);
@@ -166,9 +170,12 @@ public class NovaApi {
                 Object[] r = call("POST", "/api/v1/auth/login", body, false);
                 int status = (Integer) r[0];
                 if (status != 200 && status != 201) {
+                    JSONObject eo = r[1] instanceof JSONObject ? ((JSONObject) r[1]).optJSONObject("error") : null;
+                    lastErrorCode = eo != null ? eo.optString("code", "") : "";
                     cb.done(false, false, errorMessage(status, r[1]));
                     return;
                 }
+                lastErrorCode = "";
                 JSONObject o = r[1] instanceof JSONObject ? (JSONObject) r[1] : new JSONObject();
                 if (o.optBoolean("twoFactorRequired", false)) {
                     challenge = o.optString("challengeId", "");
@@ -212,8 +219,46 @@ public class NovaApi {
             session = "";
             csrf = "";
             firstName = "";
+            if (!rememberEmail()) email = "";
             save();
         });
+    }
+
+    // ------------------------------------------------------------ cuenta desde la app (18-nov-2026)
+
+    /** «Recordar mi correo» en la pantalla de inicio de sesion (por defecto si). */
+    public boolean rememberEmail() { return prefs.getBoolean("rememberEmail", true); }
+
+    public void setRememberEmail(boolean on) {
+        prefs.edit().putBoolean("rememberEmail", on).apply();
+    }
+
+    /** Correo de una cuenta recien creada (o recuperada): el inicio de sesion ya lo trae escrito. */
+    public void setPendingEmail(String mail) {
+        if (isLoggedIn() || mail == null) return;
+        email = mail.trim();
+        save();
+    }
+
+    /** Antibot de la app: {token, question, expiresInSeconds, termsVersion, passwordMinLength}. */
+    public void appChallenge(final Callback cb) {
+        pool.execute(() -> {
+            Object[] r = call("GET", "/api/v1/auth/app-challenge", null, false);
+            cb.done((Integer) r[0], r[1]);
+        });
+    }
+
+    /** POST sin sesion (registro, recuperar contrasena, reenviar verificacion). */
+    public void publicPost(final String path, final JSONObject body, final Callback cb) {
+        pool.execute(() -> {
+            Object[] r = call("POST", path, body == null ? new JSONObject() : body, false);
+            cb.done((Integer) r[0], r[1]);
+        });
+    }
+
+    /** GET /auth/session: datos de la cuenta (user.twoFactorEnabled). */
+    public void session(final Callback cb) {
+        get("/api/v1/auth/session", cb);
     }
 
     /** POST en el hilo actual (para usar desde un hilo de trabajo). Devuelve {status, cuerpo}. */

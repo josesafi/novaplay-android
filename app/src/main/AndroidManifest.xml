@@ -104,6 +104,12 @@
             android:name=".NetTestActivity"
             android:exported="false"
             android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection" />
+        <!-- Nova Play: crear cuenta, recuperar contrasena, reenviar confirmacion y autenticador sin salir de la app -->
+        <activity
+            android:name=".NovaAccountActivity"
+            android:exported="false"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="mcc|mnc|touchscreen|keyboard|keyboardHidden|navigation|screenLayout|fontScale|uiMode|orientation|screenSize|smallestScreenSize|layoutDirection" />
         <activity
             android:name=".NovaHome"
             android:exported="true"

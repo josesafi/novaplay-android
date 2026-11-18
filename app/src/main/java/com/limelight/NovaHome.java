@@ -70,6 +70,9 @@ public class NovaHome extends Activity {
     private TextView loginError, loginTitle, loginSub;
     private Button loginButton;
     private ProgressBar loginSpinner;
+    private View passwordRow;
+    private android.widget.CheckBox rememberBox;
+    private TextView resendLink;
 
     // inicio
     private String accountId = "";
@@ -297,11 +300,22 @@ public class NovaHome extends Activity {
 
         emailField = field("Correo", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS);
         emailField.setText(api.getEmail());
+        autofill(emailField, View.AUTOFILL_HINT_EMAIL_ADDRESS);
         card.addView(emailField, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 20));
         passwordField = field("Contraseña", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         passwordField.setImeOptions(EditorInfo.IME_ACTION_DONE);
         passwordField.setOnEditorActionListener((v, actionId, event) -> { submit(); return true; });
-        card.addView(passwordField, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        autofill(passwordField, View.AUTOFILL_HINT_PASSWORD);
+        passwordRow = passwordBox(passwordField);
+        card.addView(passwordRow, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        rememberBox = new android.widget.CheckBox(this);
+        rememberBox.setText("Recordar mi correo en este equipo");
+        rememberBox.setTextColor(MIST);
+        rememberBox.setTypeface(sora);
+        rememberBox.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        rememberBox.setChecked(api.rememberEmail());
+        rememberBox.setButtonTintList(android.content.res.ColorStateList.valueOf(LILAC));
+        card.addView(rememberBox, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 8));
         codeField = field("Código de verificación", InputType.TYPE_CLASS_TEXT);
         codeField.setVisibility(View.GONE);
         codeField.setImeOptions(EditorInfo.IME_ACTION_DONE);
@@ -311,6 +325,12 @@ public class NovaHome extends Activity {
         loginError = text("", 14, BAD, false);
         loginError.setVisibility(View.GONE);
         card.addView(loginError, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 12));
+        // cuenta sin confirmar: reenviar el correo de confirmacion sin salir de la app
+        resendLink = text("Reenviar el correo de confirmación", 14, LILAC, true);
+        resendLink.setVisibility(View.GONE);
+        resendLink.setPadding(0, dp(6), 0, dp(4));
+        resendLink.setOnClickListener(v -> account(NovaAccountActivity.MODE_VERIFY));
+        card.addView(resendLink, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 4));
 
         loginButton = button("Entrar", true);
         loginButton.setBackground(gradient(26));
@@ -323,16 +343,68 @@ public class NovaHome extends Activity {
         lpSpin.topMargin = dp(10);
         card.addView(loginSpinner, lpSpin);
 
-        LinearLayout links = new LinearLayout(this);
-        links.setGravity(Gravity.CENTER);
         TextView forgot = text("¿Olvidaste tu contraseña?", 14, MIST, false);
-        forgot.setOnClickListener(v -> openUrl("https://panel.novawebcolombia.com/forgot-password"));
-        TextView create = text("Crear cuenta", 14, LILAC, true);
-        create.setPadding(dp(18), 0, 0, 0);
-        create.setOnClickListener(v -> openUrl("https://panel.novawebcolombia.com/register"));
-        links.addView(forgot);
-        links.addView(create);
-        card.addView(links, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 16));
+        forgot.setGravity(Gravity.CENTER);
+        forgot.setPadding(0, dp(8), 0, dp(8));
+        forgot.setOnClickListener(v -> account(NovaAccountActivity.MODE_FORGOT));
+        card.addView(forgot, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 10));
+
+        // crear cuenta sin salir de la app
+        View sep = new View(this);
+        sep.setBackgroundColor(Color.parseColor("#1FFFFFFF"));
+        card.addView(sep, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(1), 14));
+        TextView newHere = text("¿Primera vez en Nova Play?", 14, MIST, false);
+        newHere.setGravity(Gravity.CENTER);
+        card.addView(newHere, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 14));
+        Button create = button("Crear cuenta gratis", false);
+        create.setOnClickListener(v -> account(NovaAccountActivity.MODE_REGISTER));
+        card.addView(create, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(50), 10));
+    }
+
+    private static final int ACCOUNT_REQUEST = 7;
+
+    private void account(String mode) {
+        Intent i = new Intent(this, NovaAccountActivity.class).putExtra(NovaAccountActivity.EXTRA_MODE, mode);
+        if (emailField != null && !api.isLoggedIn()) i.putExtra(NovaAccountActivity.EXTRA_EMAIL, emailField.getText().toString().trim());
+        startActivityForResult(i, ACCOUNT_REQUEST);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != ACCOUNT_REQUEST || api.isLoggedIn()) return;
+        // vuelve de crear cuenta / recuperar: el correo ya escrito y el cursor en la contrasena
+        String mail = data != null ? data.getStringExtra(NovaAccountActivity.EXTRA_EMAIL) : null;
+        if (emailField != null && mail != null && !mail.isEmpty()) {
+            emailField.setText(mail);
+            if (passwordField != null) passwordField.requestFocus();
+        }
+    }
+
+    private void autofill(EditText e, String hint) {
+        if (Build.VERSION.SDK_INT >= 26) {
+            e.setAutofillHints(hint);
+            e.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_YES);
+        }
+    }
+
+    /** Contraseña con «Mostrar / Ocultar». */
+    private View passwordBox(EditText e) {
+        FrameLayout f = new FrameLayout(this);
+        e.setPadding(dp(16), dp(14), dp(92), dp(14));
+        f.addView(e, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        TextView eye = text("Mostrar", 13, LILAC, true);
+        eye.setPadding(dp(14), dp(14), dp(16), dp(14));
+        eye.setOnClickListener(v -> {
+            boolean hidden = e.getTransformationMethod() instanceof android.text.method.PasswordTransformationMethod;
+            e.setTransformationMethod(hidden ? android.text.method.HideReturnsTransformationMethod.getInstance() : android.text.method.PasswordTransformationMethod.getInstance());
+            e.setSelection(e.getText().length());
+            eye.setText(hidden ? "Ocultar" : "Mostrar");
+        });
+        FrameLayout.LayoutParams p = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        p.gravity = Gravity.END | Gravity.CENTER_VERTICAL;
+        f.addView(eye, p);
+        return f;
     }
 
     private void setBusy(boolean busy) {
@@ -347,25 +419,41 @@ public class NovaHome extends Activity {
             if (!ok) {
                 loginError.setText(msg);
                 loginError.setVisibility(View.VISIBLE);
+                resendLink.setVisibility(!twoFactor && "EMAIL_VERIFICATION_REQUIRED".equals(api.lastErrorCode()) ? View.VISIBLE : View.GONE);
             } else if (need2fa) {
                 twoFactor = true;
                 loginTitle.setText("Verificación en dos pasos");
                 loginSub.setText("Escribe el código de 6 dígitos de tu app de autenticación (o un código de recuperación).");
                 emailField.setVisibility(View.GONE);
-                passwordField.setVisibility(View.GONE);
+                passwordRow.setVisibility(View.GONE);
+                rememberBox.setVisibility(View.GONE);
                 codeField.setVisibility(View.VISIBLE);
                 codeField.requestFocus();
                 loginButton.setText("Verificar");
             } else {
                 twoFactor = false;
+                commitAutofill();
                 show();
                 ui.post(poll);
             }
         });
     }
 
+    /** Inicio de sesion correcto: el administrador de contraseñas (Google) ofrece guardar o actualizar la contraseña. */
+    private void commitAutofill() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            try {
+                android.view.autofill.AutofillManager af = getSystemService(android.view.autofill.AutofillManager.class);
+                if (af != null) af.commit();
+            } catch (Exception ignored) {
+            }
+        }
+    }
+
     private void submit() {
         loginError.setVisibility(View.GONE);
+        resendLink.setVisibility(View.GONE);
+        if (!twoFactor) api.setRememberEmail(rememberBox.isChecked());
         setBusy(true);
         if (twoFactor) {
             api.loginTwoFactor(codeField.getText().toString(), this::loginResult);
@@ -742,6 +830,10 @@ public class NovaHome extends Activity {
         foot.setGravity(Gravity.CENTER_VERTICAL);
         TextView who = text(api.getEmail().isEmpty() ? "" : "Conectado como " + api.getEmail(), 13, MIST, false);
         foot.addView(who, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView sec = text("Seguridad", 14, LILAC, true);
+        sec.setPadding(0, 0, dp(18), 0);
+        sec.setOnClickListener(v -> account(NovaAccountActivity.MODE_SECURITY));
+        foot.addView(sec);
         TextView out = text("Cerrar sesión", 14, LILAC, true);
         out.setOnClickListener(v -> {
             api.logout();

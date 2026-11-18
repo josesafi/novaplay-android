@@ -513,6 +513,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                     this);
             virtualController.refreshLayout();
             virtualController.show();
+            oscVisible = true;
             // Nova Play: si ya hay un mando conectado, los controles en pantalla no hacen falta
             if (prefConfig.onscreenAuto) {
                 updateOscForGamepads();
@@ -598,6 +599,31 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     // Teclado, Esc, Tab, Windows, Alt+Tab y Salir. Sin esto, en el celular no habia forma de escribir una contrasena (el teclado solo
     // salia tocando con tres dedos) ni de usar las teclas que el celular no tiene.
     private android.widget.LinearLayout novaBar;
+    private android.widget.ImageView novaHandle;
+    private boolean oscVisible;
+
+    /** «Controles en pantalla» de la barra «N»: los crea la primera vez (ya no salen solos) y despues los muestra u oculta. */
+    private void toggleOsc() {
+        if (virtualController == null) {
+            FrameLayout parent = (FrameLayout) streamView.getParent();
+            // cuenta como el mando 1 para el juego (la mascara de mandos lo incluye desde ahora)
+            prefConfig.onscreenController = true;
+            virtualController = new VirtualController(controllerHandler, parent, this);
+            virtualController.refreshLayout();
+            virtualController.show();
+            oscVisible = true;
+            if (novaHandle != null) novaHandle.bringToFront();
+            if (novaBar != null) novaBar.bringToFront();
+        } else if (oscVisible) {
+            virtualController.hide();
+            oscVisible = false;
+        } else {
+            virtualController.show();
+            oscVisible = true;
+        }
+        Toast.makeText(this, oscVisible ? "Controles en pantalla activados" : "Controles en pantalla ocultos", Toast.LENGTH_SHORT).show();
+        if (novaBar != null) novaBar.setVisibility(View.GONE);
+    }
 
     private int novaDp(float v) {
         return (int) android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
@@ -634,9 +660,10 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         hb.setColor(android.graphics.Color.parseColor("#CC0D1022"));
         hb.setStroke(novaDp(2), android.graphics.Color.parseColor("#9B4DFF"));
         handle.setBackground(hb);
-        handle.setAlpha(0.85f);
+        handle.setAlpha(0.55f);
         handle.setContentDescription("Menú de Nova Play");
-        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(novaDp(48), novaDp(48));
+        novaHandle = handle;
+        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(novaDp(42), novaDp(42));
         hp.gravity = Gravity.TOP | Gravity.START;
         hp.leftMargin = novaDp(10);
         hp.topMargin = novaDp(70);
@@ -654,6 +681,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         novaBar.setVisibility(View.GONE);
         Object[][] items = {
                 {"⌨  Teclado", (Runnable) this::toggleKeyboard},
+                {"🎮 Controles en pantalla", (Runnable) this::toggleOsc},
                 {"Esc", (Runnable) () -> novaKey(KeyEvent.KEYCODE_ESCAPE)},
                 {"Tab", (Runnable) () -> novaKey(KeyEvent.KEYCODE_TAB)},
                 {"⊞ Win", (Runnable) () -> novaKey(KeyEvent.KEYCODE_META_LEFT)},
@@ -704,7 +732,7 @@ public class Game extends Activity implements SurfaceHolder.Callback,
                         }
                         return true;
                     case MotionEvent.ACTION_UP:
-                        v.setAlpha(0.85f);
+                        v.setAlpha(0.55f);
                         if (!moved) novaBar.setVisibility(novaBar.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
                         return true;
                 }
@@ -721,9 +749,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         if (isHidingOverlays) return; // en PiP siguen ocultos; al salir se aplica este estado
         if (hasPad) {
             virtualController.hide();
+            oscVisible = false;
             Toast.makeText(this, "Mando conectado: ocultamos los controles en pantalla", Toast.LENGTH_SHORT).show();
         } else {
             virtualController.show();
+            oscVisible = true;
         }
     }
 
