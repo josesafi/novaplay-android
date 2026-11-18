@@ -611,7 +611,8 @@ public class Game extends Activity implements SurfaceHolder.Callback,
     private boolean oscVisible;
 
     /** «Controles en pantalla» de la barra «N»: los crea la primera vez (ya no salen solos) y despues los muestra u oculta. */
-    private void toggleOsc() {
+    @Override
+    public void toggleOsc() {
         if (virtualController == null) {
             FrameLayout parent = (FrameLayout) streamView.getParent();
             // cuenta como el mando 1 para el juego (la mascara de mandos lo incluye desde ahora)
