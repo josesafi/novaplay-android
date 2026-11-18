@@ -61,6 +61,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.util.Rational;
+import android.view.Gravity;
+import android.view.ViewGroup;
 import android.view.Display;
 import android.view.InputDevice;
 import android.view.KeyCharacterMap;
@@ -518,6 +520,11 @@ public class Game extends Activity implements SurfaceHolder.Callback,
             }
         }
 
+        // Nova Play: barra flotante con teclado y teclas que un celular no tiene (Esc, Tab, Windows, Alt+Tab) y salir
+        if (getPackageManager().hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)) {
+            addNovaToolbar((FrameLayout) streamView.getParent());
+        }
+
         if (prefConfig.usbDriver) {
             // Start the USB driver
             bindService(new Intent(this, UsbDriverService.class),
@@ -586,6 +593,125 @@ public class Game extends Activity implements SurfaceHolder.Callback,
         @Override public void onInputDeviceRemoved(int deviceId) { updateOscForGamepads(); }
         @Override public void onInputDeviceChanged(int deviceId) { updateOscForGamepads(); }
     };
+
+    // ---- Nova Play: barra flotante (como el boton de los servicios grandes): un boton «N» que se puede arrastrar y, al tocarlo, abre
+    // Teclado, Esc, Tab, Windows, Alt+Tab y Salir. Sin esto, en el celular no habia forma de escribir una contrasena (el teclado solo
+    // salia tocando con tres dedos) ni de usar las teclas que el celular no tiene.
+    private android.widget.LinearLayout novaBar;
+
+    private int novaDp(float v) {
+        return (int) android.util.TypedValue.applyDimension(android.util.TypedValue.COMPLEX_UNIT_DIP, v, getResources().getDisplayMetrics());
+    }
+
+    private void novaKey(int androidKeyCode) {
+        keyboardEvent(true, (short) androidKeyCode);
+        keyboardEvent(false, (short) androidKeyCode);
+    }
+
+    private android.widget.TextView novaButton(String label, Runnable action) {
+        android.widget.TextView b = new android.widget.TextView(this);
+        b.setText(label);
+        b.setTextColor(android.graphics.Color.WHITE);
+        b.setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 14);
+        b.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        b.setGravity(Gravity.CENTER);
+        b.setPadding(novaDp(14), 0, novaDp(14), 0);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(android.graphics.Color.parseColor("#33FFFFFF"));
+        bg.setCornerRadius(novaDp(18));
+        b.setBackground(bg);
+        b.setOnClickListener(v -> action.run());
+        return b;
+    }
+
+    private void addNovaToolbar(FrameLayout parent) {
+        // el boton «N»
+        final android.widget.ImageView handle = new android.widget.ImageView(this);
+        handle.setImageResource(R.drawable.novaplay_n);
+        handle.setPadding(novaDp(9), novaDp(9), novaDp(9), novaDp(9));
+        android.graphics.drawable.GradientDrawable hb = new android.graphics.drawable.GradientDrawable();
+        hb.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+        hb.setColor(android.graphics.Color.parseColor("#CC0D1022"));
+        hb.setStroke(novaDp(2), android.graphics.Color.parseColor("#9B4DFF"));
+        handle.setBackground(hb);
+        handle.setAlpha(0.85f);
+        handle.setContentDescription("Menú de Nova Play");
+        FrameLayout.LayoutParams hp = new FrameLayout.LayoutParams(novaDp(48), novaDp(48));
+        hp.gravity = Gravity.TOP | Gravity.START;
+        hp.leftMargin = novaDp(10);
+        hp.topMargin = novaDp(70);
+        parent.addView(handle, hp);
+
+        // la barra con las teclas
+        novaBar = new android.widget.LinearLayout(this);
+        novaBar.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+        novaBar.setPadding(novaDp(8), novaDp(6), novaDp(8), novaDp(6));
+        android.graphics.drawable.GradientDrawable bb = new android.graphics.drawable.GradientDrawable();
+        bb.setColor(android.graphics.Color.parseColor("#E60D1022"));
+        bb.setCornerRadius(novaDp(24));
+        bb.setStroke(novaDp(1), android.graphics.Color.parseColor("#669B4DFF"));
+        novaBar.setBackground(bb);
+        novaBar.setVisibility(View.GONE);
+        Object[][] items = {
+                {"⌨  Teclado", (Runnable) this::toggleKeyboard},
+                {"Esc", (Runnable) () -> novaKey(KeyEvent.KEYCODE_ESCAPE)},
+                {"Tab", (Runnable) () -> novaKey(KeyEvent.KEYCODE_TAB)},
+                {"⊞ Win", (Runnable) () -> novaKey(KeyEvent.KEYCODE_META_LEFT)},
+                {"Alt+Tab", (Runnable) () -> {
+                    keyboardEvent(true, (short) KeyEvent.KEYCODE_ALT_LEFT);
+                    novaKey(KeyEvent.KEYCODE_TAB);
+                    keyboardEvent(false, (short) KeyEvent.KEYCODE_ALT_LEFT);
+                }},
+                {"Salir", (Runnable) this::finish},
+        };
+        for (Object[] it : items) {
+            android.widget.TextView b = novaButton((String) it[0], (Runnable) it[1]);
+            android.widget.LinearLayout.LayoutParams lp = new android.widget.LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, novaDp(38));
+            lp.leftMargin = novaDp(4);
+            lp.rightMargin = novaDp(4);
+            novaBar.addView(b, lp);
+        }
+        FrameLayout.LayoutParams bp = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        bp.gravity = Gravity.TOP | Gravity.START;
+        bp.leftMargin = novaDp(66);
+        bp.topMargin = novaDp(74);
+        parent.addView(novaBar, bp);
+
+        // tocar abre o cierra la barra; arrastrar mueve el boton (y la barra lo sigue) para que no tape el juego
+        handle.setOnTouchListener(new View.OnTouchListener() {
+            float downX, downY, startLeft, startTop;
+            boolean moved;
+
+            @Override
+            public boolean onTouch(View v, MotionEvent e) {
+                FrameLayout.LayoutParams p = (FrameLayout.LayoutParams) v.getLayoutParams();
+                switch (e.getActionMasked()) {
+                    case MotionEvent.ACTION_DOWN:
+                        downX = e.getRawX(); downY = e.getRawY(); startLeft = p.leftMargin; startTop = p.topMargin; moved = false;
+                        v.setAlpha(1f);
+                        return true;
+                    case MotionEvent.ACTION_MOVE:
+                        float dx = e.getRawX() - downX, dy = e.getRawY() - downY;
+                        if (Math.abs(dx) > novaDp(6) || Math.abs(dy) > novaDp(6)) moved = true;
+                        if (moved) {
+                            p.leftMargin = (int) Math.max(0, Math.min(parent.getWidth() - v.getWidth(), startLeft + dx));
+                            p.topMargin = (int) Math.max(0, Math.min(parent.getHeight() - v.getHeight(), startTop + dy));
+                            v.setLayoutParams(p);
+                            FrameLayout.LayoutParams q = (FrameLayout.LayoutParams) novaBar.getLayoutParams();
+                            q.leftMargin = p.leftMargin + novaDp(56);
+                            q.topMargin = p.topMargin + novaDp(4);
+                            novaBar.setLayoutParams(q);
+                        }
+                        return true;
+                    case MotionEvent.ACTION_UP:
+                        v.setAlpha(0.85f);
+                        if (!moved) novaBar.setVisibility(novaBar.getVisibility() == View.VISIBLE ? View.GONE : View.VISIBLE);
+                        return true;
+                }
+                return false;
+            }
+        });
+    }
 
     private void updateOscForGamepads() {
         if (virtualController == null) return;
