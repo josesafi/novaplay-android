@@ -17,6 +17,9 @@ import android.os.Looper;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.KeyEvent;
+import android.widget.PopupMenu;
+import android.content.res.Configuration;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.inputmethod.EditorInfo;
@@ -31,7 +34,9 @@ import android.widget.TextView;
 
 import com.limelight.binding.PlatformBinding;
 import com.limelight.computers.ComputerManagerService;
+import com.limelight.nova.CoverLoader;
 import com.limelight.nova.NovaApi;
+import com.limelight.nvstream.http.NvApp;
 import com.limelight.nvstream.http.ComputerDetails;
 import com.limelight.nvstream.http.NvHTTP;
 import com.limelight.nvstream.http.PairingManager;
@@ -41,6 +46,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.util.Calendar;
+import java.util.List;
 
 /**
  * Nova Play: pantalla principal propia. Sin sesion: iniciar sesion con la cuenta de novawebcolombia.com (con verificacion en dos
@@ -82,6 +88,19 @@ public class NovaHome extends Activity {
     private String wakeError = "";
     private LinearLayout homeBox;
 
+    // catálogo estilo GeForce NOW (19-nov-2026): null = todavía no llega; catalogFailed = API vieja, se usa el flujo de antes
+    private JSONArray catalog;
+    private boolean catalogFailed;
+    private boolean catalogLoading;
+    private FrameLayout frame;
+    private FrameLayout overlay;
+    private TextView overlayTitle, overlaySub;
+    private ProgressBar overlaySpin;
+    private LinearLayout overlayButtons;
+    private boolean launching;
+    private long streamStartedAt;
+    private JSONObject lastItem;
+
     // «Jugar» de un toque: el servicio de equipos de Moonlight (agregar, emparejar) y el estado de la conexion
     private ComputerManagerService.ComputerManagerBinder managerBinder;
     private boolean connecting;
@@ -116,7 +135,7 @@ public class NovaHome extends Activity {
         getWindow().setStatusBarColor(Color.TRANSPARENT);
         getWindow().setNavigationBarColor(NIGHT);
         loadFonts();
-        FrameLayout frame = new FrameLayout(this);
+        frame = new FrameLayout(this);
         frame.setBackground(new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{Color.parseColor("#1B1240"), Color.parseColor("#0B0A1E"), NIGHT, NIGHT}));
         // brillo morado de la marca arriba a la derecha
@@ -159,6 +178,17 @@ public class NovaHome extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (streamStartedAt > 0) {
+            long secs = (System.currentTimeMillis() - streamStartedAt) / 1000;
+            streamStartedAt = 0;
+            final JSONObject item = lastItem;
+            if (secs < 20 && item != null) {
+                showOverlay("No se pudo iniciar " + item.optString("title"), "La conexión con tu consola se cortó al empezar. Revisa tu internet e inténtalo otra vez.", false);
+                overlayActions(true);
+            } else {
+                hideOverlay();
+            }
+        }
         if (api.isLoggedIn()) {
             ui.removeCallbacks(poll);
             ui.post(poll);
@@ -522,6 +552,16 @@ public class NovaHome extends Activity {
             });
             return;
         }
+        if (catalog == null && !catalogFailed && !catalogLoading) {
+            catalogLoading = true;
+            api.get("/api/v1/accounts/" + accountId + "/play/catalog", (status, body) -> {
+                catalogLoading = false;
+                JSONArray items = status == 200 && body instanceof JSONObject ? ((JSONObject) body).optJSONArray("items") : null;
+                if (items != null && items.length() > 0) catalog = items;
+                else if (status != 401) catalogFailed = true;
+                ui.post(this::renderHome);
+            });
+        }
         api.get("/api/v1/accounts/" + accountId + "/play", (status, body) -> {
             if (status == 200 && body instanceof JSONObject) {
                 play = (JSONObject) body;
@@ -560,6 +600,68 @@ public class NovaHome extends Activity {
      * «Jugar»: agrega la consola por su direccion publica, la primera vez empareja este celular sin codigos (el codigo se registra en
      * la cuenta por la API y el agente de la consola lo confirma) y abre la lista de apps de la consola.
      */
+    /** Agrega la consola y la primera vez empareja este celular (sin códigos). Corre en un hilo de trabajo. err[0] = mensaje si falla. */
+    private ComputerDetails connectConsole(String address, String hostId, String[] err) {
+        try {
+            String host = address;
+            int port = NvHTTP.DEFAULT_HTTP_PORT;
+            int colon = address.lastIndexOf(':');
+            if (colon > 0 && address.indexOf(':') == colon) {
+                host = address.substring(0, colon);
+                try {
+                    port = Integer.parseInt(address.substring(colon + 1));
+                } catch (NumberFormatException ignored) {
+                }
+            }
+            ComputerDetails details = new ComputerDetails();
+            details.manualAddress = new ComputerDetails.AddressTuple(host, port);
+            if (!managerBinder.addComputerBlocking(details)) {
+                err[0] = "No pudimos conectar con tu consola. Revisa tu internet e inténtalo de nuevo.";
+                return null;
+            }
+            ComputerDetails computer = managerBinder.getComputer(details.uuid);
+            if (computer == null) computer = details;
+            NvHTTP http = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer), computer.httpsPort,
+                    managerBinder.getUniqueId(), computer.serverCert, PlatformBinding.getCryptoProvider(NovaHome.this));
+            if (http.getPairState() != PairingManager.PairState.PAIRED) {
+                setStatus("Preparando tu celular para jugar (solo la primera vez)…");
+                String pin = PairingManager.generatePinString();
+                JSONObject body = new JSONObject().put("hostId", hostId).put("pin", pin).put("name", "Nova Play " + Build.MODEL);
+                Object[] r = api.postNow("/api/v1/accounts/" + accountId + "/play/devices", body);
+                int status = (Integer) r[0];
+                if (status != 200 && status != 201) {
+                    err[0] = NovaApi.errorMessage(status, r[1]);
+                    return null;
+                }
+                PairingManager pm = http.getPairingManager();
+                PairingManager.PairState st = pm.pair(http.getServerInfo(true), pin);
+                if (st != PairingManager.PairState.PAIRED) {
+                    err[0] = "No se pudo emparejar tu celular con la consola. Inténtalo de nuevo en un minuto.";
+                    return null;
+                }
+                ComputerDetails stored = managerBinder.getComputer(computer.uuid);
+                if (stored != null) {
+                    stored.serverCert = pm.getPairedCert();
+                    computer = stored;
+                } else {
+                    computer.serverCert = pm.getPairedCert();
+                }
+                managerBinder.invalidateStateForComputer(computer.uuid);
+            }
+            if (computer.activeAddress == null) computer.activeAddress = details.manualAddress;
+            return computer;
+        } catch (Exception e) {
+            err[0] = "No pudimos conectar con tu consola. Inténtalo de nuevo.";
+            return null;
+        }
+    }
+
+    // el estado de la conexion va a la capa «Preparando…» si esta abierta, si no a la tarjeta de la consola
+    private void setStatus(String msg) {
+        if (launching) ui.post(() -> showOverlay(null, msg, true));
+        else setConnect(msg);
+    }
+
     private void startPlay() {
         if (managerBinder == null) {
             wakeError = "Nova Play se está preparando. Inténtalo de nuevo en unos segundos.";
@@ -573,52 +675,9 @@ public class NovaHome extends Activity {
         wakeError = "";
         renderHome();
         new Thread(() -> {
-            String err = null;
-            ComputerDetails computer = null;
-            try {
-                String host = address;
-                int port = NvHTTP.DEFAULT_HTTP_PORT;
-                int colon = address.lastIndexOf(':');
-                if (colon > 0 && address.indexOf(':') == colon) {
-                    host = address.substring(0, colon);
-                    try {
-                        port = Integer.parseInt(address.substring(colon + 1));
-                    } catch (NumberFormatException ignored) {
-                    }
-                }
-                ComputerDetails details = new ComputerDetails();
-                details.manualAddress = new ComputerDetails.AddressTuple(host, port);
-                if (!managerBinder.addComputerBlocking(details)) {
-                    err = "No pudimos conectar con tu consola. Revisa tu internet e inténtalo de nuevo.";
-                } else {
-                    computer = managerBinder.getComputer(details.uuid);
-                    if (computer == null) computer = details;
-                    NvHTTP http = new NvHTTP(ServerHelper.getCurrentAddressFromComputer(computer), computer.httpsPort,
-                            managerBinder.getUniqueId(), computer.serverCert, PlatformBinding.getCryptoProvider(NovaHome.this));
-                    if (http.getPairState() != PairingManager.PairState.PAIRED) {
-                        setConnect("Preparando tu celular para jugar (solo la primera vez)…");
-                        String pin = PairingManager.generatePinString();
-                        JSONObject body = new JSONObject().put("hostId", hostId).put("pin", pin).put("name", "Nova Play " + Build.MODEL);
-                        Object[] r = api.postNow("/api/v1/accounts/" + accountId + "/play/devices", body);
-                        int status = (Integer) r[0];
-                        if (status != 200 && status != 201) {
-                            err = NovaApi.errorMessage(status, r[1]);
-                        } else {
-                            PairingManager pm = http.getPairingManager();
-                            PairingManager.PairState st = pm.pair(http.getServerInfo(true), pin);
-                            if (st == PairingManager.PairState.PAIRED) {
-                                ComputerDetails stored = managerBinder.getComputer(computer.uuid);
-                                if (stored != null) stored.serverCert = pm.getPairedCert();
-                                managerBinder.invalidateStateForComputer(computer.uuid);
-                            } else {
-                                err = "No se pudo emparejar tu celular con la consola. Inténtalo de nuevo en un minuto.";
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                err = "No pudimos conectar con tu consola. Inténtalo de nuevo.";
-            }
+            String[] e = new String[1];
+            ComputerDetails computer = connectConsole(address, hostId, e);
+            String err = e[0];
             final String fe = err;
             final ComputerDetails fc = computer;
             ui.post(() -> {
@@ -673,6 +732,10 @@ public class NovaHome extends Activity {
 
     private void renderHome() {
         if (homeBox == null || !api.isLoggedIn()) return;
+        if (catalog != null) {
+            renderCatalog();
+            return;
+        }
         homeBox.removeAllViews();
 
         // cabecera: logo a la izquierda, inicial del usuario a la derecha
@@ -845,5 +908,362 @@ public class NovaHome extends Activity {
         });
         foot.addView(out);
         homeBox.addView(foot, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 26));
+    }
+
+    // ------------------------------------------------------------------ catálogo estilo GeForce NOW (19-nov-2026)
+
+    private int columns() {
+        boolean land = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        float wDp = getResources().getDisplayMetrics().widthPixels / getResources().getDisplayMetrics().density;
+        if (!land) return wDp >= 600 ? 3 : 2;
+        return wDp >= 960 ? 4 : 3;
+    }
+
+    // foco visible para el mando: borde morado alrededor de la tarjeta elegida
+    private void focusable(final View v, final Runnable onPlay) {
+        v.setFocusable(true);
+        v.setClickable(true);
+        v.setOnClickListener(x -> onPlay.run());
+        v.setOnKeyListener((x, code, ev) -> {
+            if (ev.getAction() == KeyEvent.ACTION_UP && (code == KeyEvent.KEYCODE_BUTTON_A || code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER)) {
+                onPlay.run();
+                return true;
+            }
+            return false;
+        });
+        v.setOnFocusChangeListener((x, has) -> {
+            x.setScaleX(has ? 1.04f : 1f);
+            x.setScaleY(has ? 1.04f : 1f);
+            if (Build.VERSION.SDK_INT >= 23) x.setForeground(has ? box(Color.TRANSPARENT, 16, VIOLET) : null);
+            else x.setAlpha(has ? 1f : 0.85f);
+        });
+    }
+
+    private View tile(final JSONObject item, boolean store) {
+        LinearLayout t = new LinearLayout(this);
+        t.setOrientation(LinearLayout.VERTICAL);
+        FrameLayout art = new FrameLayout(this);
+        art.setBackground(box(CARD, 16, Color.parseColor("#1AFFFFFF")));
+        art.setClipToOutline(true);
+        TextView ph = text(item.optString("title"), 14, MIST, true);
+        ph.setGravity(Gravity.CENTER);
+        art.addView(ph, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        ImageView img = new ImageView(this);
+        img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        art.addView(img, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        CoverLoader.get(this).load(item.optString("cover"), img);
+        String tag = item.optString("tag", "");
+        if (!tag.isEmpty()) {
+            TextView badge = text(tag, 10, Color.WHITE, true);
+            badge.setPadding(dp(8), dp(3), dp(8), dp(3));
+            badge.setBackground(box(Color.parseColor("#CC0D1022"), 10, 0));
+            FrameLayout.LayoutParams lb = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lb.gravity = Gravity.TOP | Gravity.START;
+            lb.setMargins(dp(8), dp(8), 0, 0);
+            art.addView(badge, lb);
+        }
+        // portada 460×215 (proporción de Steam)
+        art.addOnLayoutChangeListener((v, l, tp, r, b, ol, ot, or, ob) -> {
+            int want = Math.round((r - l) * 215f / 460f);
+            if (b - tp != want && want > 0) {
+                ViewGroup.LayoutParams p = v.getLayoutParams();
+                p.height = want;
+                v.post(() -> v.setLayoutParams(p));
+            }
+        });
+        t.addView(art, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(store ? 80 : 90)));
+        TextView name = text(item.optString("title"), 14, FROST, true);
+        name.setMaxLines(1);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        t.addView(name, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+        if (store) {
+            TextView d = text(item.optString("desc"), 12, MIST, false);
+            d.setMaxLines(1);
+            t.addView(d, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 1));
+        }
+        focusable(t, () -> playGame(item));
+        return t;
+    }
+
+    private void grid(List<JSONObject> items, int cols, boolean store) {
+        for (int i = 0; i < items.size(); i += cols) {
+            LinearLayout row = new LinearLayout(this);
+            for (int c = 0; c < cols; c++) {
+                LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+                if (c > 0) p.leftMargin = dp(12);
+                if (i + c < items.size()) row.addView(tile(items.get(i + c), store), p);
+                else row.addView(new View(this), p);
+            }
+            homeBox.addView(row, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 14));
+        }
+    }
+
+    private void renderCatalog() {
+        homeBox.removeAllViews();
+        // cabecera: logo y menú (Mis consolas, Prueba de red, Seguridad, Cerrar sesión)
+        LinearLayout head = new LinearLayout(this);
+        head.setGravity(Gravity.CENTER_VERTICAL);
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(R.drawable.novaplay_logo);
+        logo.setAdjustViewBounds(true);
+        logo.setScaleType(ImageView.ScaleType.FIT_START);
+        head.addView(logo, new LinearLayout.LayoutParams(0, dp(24), 1f));
+        TextView menu = text("⋯", 24, FROST, true);
+        menu.setGravity(Gravity.CENTER);
+        menu.setBackground(box(Color.parseColor("#14FFFFFF"), 20, 0));
+        menu.setContentDescription("Más opciones");
+        focusable(menu, () -> showMenu(menu));
+        head.addView(menu, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        homeBox.addView(head, lp(ViewGroup.LayoutParams.MATCH_PARENT, dp(44), 4));
+
+        homeBox.addView(text(greeting(), 24, FROST, true), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 16));
+        if (play != null) {
+            long pkg = play.optLong("packageMinutesLeft");
+            String line = "Saldo " + money(play.optLong("balanceMinor")) + " · " + (pkg > 0 ? hm(pkg) + " de paquete" : hm(play.optLong("minutesAffordable")) + " para jugar");
+            homeBox.addView(text(line, 14, MIST, false), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 4));
+            boolean online = myHost != null && myHost.optBoolean("online");
+            boolean asleep = myHost != null && myHost.optBoolean("asleep");
+            boolean starting = waking || (myHost != null && myHost.optBoolean("starting"));
+            String st = myHost == null ? "Sin consola asignada: escríbenos a soporte"
+                    : starting ? "Tu consola se está encendiendo…"
+                    : online ? "Tu consola está lista" : asleep ? "Tu consola está apagada: se enciende sola al elegir un juego" : "Tu consola no responde en este momento";
+            TextView sl = text("● " + st, 13, online ? OK : asleep || starting ? ELECTRIC : MIST, false);
+            homeBox.addView(sl, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 4));
+            if (!play.optBoolean("canStart")) {
+                homeBox.addView(text("Necesitas tiempo de juego: recarga tu saldo o compra un paquete en novawebcolombia.com.", 13, WARN, false),
+                        lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 8));
+            }
+        }
+        if (!wakeError.isEmpty()) homeBox.addView(text(wakeError, 13, BAD, false), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 8));
+
+        List<JSONObject> stores = new java.util.ArrayList<>(), games = new java.util.ArrayList<>();
+        for (int i = 0; i < catalog.length(); i++) {
+            JSONObject it = catalog.optJSONObject(i);
+            if (it == null) continue;
+            if ("store".equals(it.optString("kind"))) stores.add(it);
+            else games.add(it);
+        }
+        int cols = columns();
+        if (!stores.isEmpty()) {
+            homeBox.addView(semi("Tus tiendas", 17, FROST), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 22));
+            grid(stores, Math.max(2, Math.min(cols, stores.size())), true);
+        }
+        if (!games.isEmpty()) {
+            homeBox.addView(semi("Juegos", 17, FROST), lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 24));
+            homeBox.addView(text("Toca uno y entras directo, sin escritorio. Los de pago se juegan con tu cuenta de Steam.", 12, MIST, false),
+                    lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 2));
+            grid(games, cols, false);
+        }
+        homeBox.addView(text(api.getEmail().isEmpty() ? "" : "Conectado como " + api.getEmail(), 12, MIST, false),
+                lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 26));
+    }
+
+    private void showMenu(View anchor) {
+        PopupMenu m = new PopupMenu(this, anchor);
+        m.getMenu().add(0, 1, 0, "Mis consolas");
+        m.getMenu().add(0, 2, 1, "Prueba de red");
+        m.getMenu().add(0, 3, 2, "Seguridad (autenticador)");
+        m.getMenu().add(0, 4, 3, "Cerrar sesión");
+        m.setOnMenuItemClickListener(mi -> {
+            switch (mi.getItemId()) {
+                case 1:
+                    startActivity(new Intent(this, PcView.class));
+                    break;
+                case 2: {
+                    Intent i = new Intent(this, NetTestActivity.class);
+                    String addr = myHost != null ? myHost.optString("publicHost") : "";
+                    int colon = addr.lastIndexOf(':');
+                    if (colon > 0 && addr.indexOf(':') == colon) addr = addr.substring(0, colon);
+                    if (!addr.isEmpty()) i.putExtra(NetTestActivity.HOST_EXTRA, addr);
+                    startActivity(i);
+                    break;
+                }
+                case 3:
+                    account(NovaAccountActivity.MODE_SECURITY);
+                    break;
+                case 4:
+                    api.logout();
+                    accountId = "";
+                    play = null;
+                    myHost = null;
+                    catalog = null;
+                    catalogFailed = false;
+                    root.removeAllViews();
+                    showLogin();
+                    break;
+                default:
+                    return false;
+            }
+            return true;
+        });
+        m.show();
+    }
+
+    // capa «Preparando Hades…»: rueda y estado durante toda la espera (regla del dueño)
+    private void showOverlay(String title, String sub, boolean spinning) {
+        if (overlay == null) {
+            overlay = new FrameLayout(this);
+            overlay.setBackgroundColor(Color.parseColor("#F205071A"));
+            overlay.setClickable(true);
+            LinearLayout c = new LinearLayout(this);
+            c.setOrientation(LinearLayout.VERTICAL);
+            c.setGravity(Gravity.CENTER_HORIZONTAL);
+            c.setPadding(dp(28), 0, dp(28), 0);
+            ImageView n = new ImageView(this);
+            n.setImageResource(R.drawable.novaplay_n);
+            c.addView(n, new LinearLayout.LayoutParams(dp(72), dp(72)));
+            overlaySpin = new ProgressBar(this);
+            c.addView(overlaySpin, lp(dp(40), dp(40), 18));
+            overlayTitle = text("", 22, FROST, true);
+            overlayTitle.setGravity(Gravity.CENTER);
+            c.addView(overlayTitle, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 14));
+            overlaySub = text("", 14, MIST, false);
+            overlaySub.setGravity(Gravity.CENTER);
+            c.addView(overlaySub, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 6));
+            overlayButtons = new LinearLayout(this);
+            overlayButtons.setGravity(Gravity.CENTER);
+            c.addView(overlayButtons, lp(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 20));
+            FrameLayout.LayoutParams lc = new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            lc.gravity = Gravity.CENTER;
+            overlay.addView(c, lc);
+            frame.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        overlay.setVisibility(View.VISIBLE);
+        if (title != null) overlayTitle.setText(title);
+        if (sub != null) overlaySub.setText(sub);
+        overlaySpin.setVisibility(spinning ? View.VISIBLE : View.GONE);
+        if (spinning) overlayButtons.removeAllViews();
+    }
+
+    private void overlayActions(boolean retry) {
+        overlayButtons.removeAllViews();
+        if (retry && lastItem != null) {
+            Button again = button("Reintentar", true);
+            again.setBackground(gradient(24));
+            final JSONObject item = lastItem;
+            again.setOnClickListener(v -> playGame(item));
+            overlayButtons.addView(again, new LinearLayout.LayoutParams(dp(150), dp(48)));
+        }
+        Button close = button("Volver", false);
+        close.setOnClickListener(v -> hideOverlay());
+        LinearLayout.LayoutParams lc = new LinearLayout.LayoutParams(dp(130), dp(48));
+        lc.leftMargin = dp(12);
+        overlayButtons.addView(close, lc);
+        overlayButtons.getChildAt(0).requestFocus();
+    }
+
+    private void hideOverlay() {
+        if (overlay != null) overlay.setVisibility(View.GONE);
+    }
+
+    private void failLaunch(String msg) {
+        ui.post(() -> {
+            launching = false;
+            String t = lastItem != null ? "No se pudo abrir " + lastItem.optString("title") : "No se pudo abrir el juego";
+            showOverlay(t, msg, false);
+            overlayActions(true);
+            refresh();
+        });
+    }
+
+    /**
+     * Tocar un juego (o una tienda): la consola lo recibe («quiero jugar X»), se enciende si estaba apagada, se empareja la primera vez y
+     * se abre DIRECTO la app «Nova Play» de la consola: el cliente aparece dentro del juego, sin escritorio ni lista de apps.
+     */
+    private void playGame(final JSONObject item) {
+        if (launching) return;
+        if (play != null && !play.optBoolean("canStart")) {
+            lastItem = null;
+            showOverlay("Necesitas tiempo de juego", "Recarga tu saldo o compra un paquete en novawebcolombia.com.", false);
+            overlayActions(false);
+            return;
+        }
+        if (myHost == null) {
+            lastItem = null;
+            showOverlay("Sin consola asignada", "Escríbenos a soporte para asignarte una consola.", false);
+            overlayActions(false);
+            return;
+        }
+        launching = true;
+        lastItem = item;
+        wakeError = "";
+        final String title = item.optString("title");
+        showOverlay("Preparando " + title + "…", "Conectando con tu consola", true);
+        new Thread(() -> {
+            try {
+                Object[] r = api.postNow("/api/v1/accounts/" + accountId + "/play/launch", new JSONObject().put("gameId", item.optString("id")));
+                int status = (Integer) r[0];
+                if (status != 200 && status != 404) {
+                    failLaunch(NovaApi.errorMessage(status, r[1]));
+                    return;
+                }
+                // consola apagada o encendiendo: se enciende y se espera a que esté lista (hasta 3 min)
+                JSONObject host = myHost;
+                if (!host.optBoolean("online")) {
+                    if (host.optBoolean("asleep") && !host.optBoolean("starting")) {
+                        setStatus("Encendiendo tu consola… (20 a 30 segundos)");
+                        Object[] w = api.postNow("/api/v1/accounts/" + accountId + "/play/hosts/" + host.optString("id") + "/wake", null);
+                        if ((Integer) w[0] != 200) {
+                            failLaunch(NovaApi.errorMessage((Integer) w[0], w[1]));
+                            return;
+                        }
+                    } else {
+                        setStatus("Encendiendo tu consola…");
+                    }
+                    long until = System.currentTimeMillis() + 180_000;
+                    while (true) {
+                        Thread.sleep(4000);
+                        Object[] p = api.getNow("/api/v1/accounts/" + accountId + "/play");
+                        if ((Integer) p[0] == 200 && p[1] instanceof JSONObject) {
+                            play = (JSONObject) p[1];
+                            JSONObject h = pickHost(play);
+                            if (h != null && h.optString("id").equals(host.optString("id"))) {
+                                myHost = h;
+                                host = h;
+                                if (h.optBoolean("online")) break;
+                            }
+                        }
+                        if (System.currentTimeMillis() > until) {
+                            failLaunch("Tu consola tardó demasiado en encender. Inténtalo de nuevo en un minuto.");
+                            return;
+                        }
+                    }
+                }
+                if (managerBinder == null) {
+                    failLaunch("Nova Play se está preparando. Inténtalo de nuevo en unos segundos.");
+                    return;
+                }
+                setStatus("Conectando con tu consola…");
+                String[] e = new String[1];
+                ComputerDetails computer = connectConsole(host.optString("publicHost"), host.optString("id"), e);
+                if (computer == null) {
+                    failLaunch(e[0] != null ? e[0] : "No pudimos conectar con tu consola.");
+                    return;
+                }
+                setStatus("Abriendo " + title + "…");
+                NvHTTP http = new NvHTTP(computer.activeAddress, computer.httpsPort, managerBinder.getUniqueId(), computer.serverCert,
+                        PlatformBinding.getCryptoProvider(NovaHome.this));
+                List<NvApp> apps = http.getAppList();
+                NvApp target = null;
+                for (NvApp a : apps) if ("Nova Play".equalsIgnoreCase(a.getAppName())) target = a;
+                if (target == null && !apps.isEmpty()) target = apps.get(0);
+                if (target == null) {
+                    failLaunch("Tu consola no tiene la app de Nova Play. Escríbenos a soporte.");
+                    return;
+                }
+                final NvApp app = target;
+                final ComputerDetails fc = computer;
+                ui.post(() -> {
+                    launching = false;
+                    showOverlay("Abriendo " + title + "…", "En unos segundos estás jugando", true);
+                    streamStartedAt = System.currentTimeMillis();
+                    startActivity(ServerHelper.createStartIntent(NovaHome.this, app, fc, managerBinder));
+                });
+            } catch (InterruptedException ie) {
+                failLaunch("Se canceló.");
+            } catch (Exception ex) {
+                failLaunch("No pudimos conectar con tu consola. Revisa tu internet e inténtalo de nuevo.");
+            }
+        }).start();
     }
 }
