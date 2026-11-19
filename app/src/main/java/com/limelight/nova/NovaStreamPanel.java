@@ -26,6 +26,9 @@ import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -49,6 +52,8 @@ public class NovaStreamPanel {
         boolean isStatsVisible();
         void setStatsVisible(boolean visible);
         void showKeyboard();
+        /** Manda a la consola Ctrl+Alt+Fin: el lanzador de la consola cierra SOLO el juego (respaldo si no hay internet en la app). */
+        void sendCloseGameKeys();
         /** Guarda la nueva calidad ya escrita en las preferencias y vuelve a conectar con la misma consola. */
         void reconnect();
         NovaAudioControl audio();
@@ -177,6 +182,7 @@ public class NovaStreamPanel {
         scroll.addView(content);
         sheet.addView(scroll, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
 
+        View closeFirst = buildCloseGame();
         buildVideo();
         buildSound();
         buildInput();
@@ -192,8 +198,128 @@ public class NovaStreamPanel {
 
         parent.addView(root, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
         root.bringToFront();
-        firstFocus = x;
-        x.requestFocus(); // el mando empieza arriba
+        firstFocus = closeFirst != null ? closeFirst : x;
+        firstFocus.requestFocus(); // el mando empieza arriba: «Cerrar el juego» es lo que se busca cuando algo se congela
+    }
+
+    // ------------------------------------------------------------------------------------------------ cerrar el juego
+
+    private static final int DANGER = Color.parseColor("#EF4444");
+
+    /**
+     * «Cerrar el juego» (19-nov-2026, pedido del dueno: un juego se congelo y no habia como salir sin cerrar toda la sesion). La consola
+     * cierra SOLO el juego y muestra «Cerraste el juego · Seguir jugando»; la sesion, Steam y las partidas guardadas siguen. Se pide por
+     * la API (llega aunque el juego tenga capturado el teclado) y, de respaldo, con el atajo Ctrl+Alt+Fin.
+     */
+    private View buildCloseGame() {
+        LinearLayout box = new LinearLayout(act);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.setPadding(dp(14), dp(12), dp(14), dp(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.parseColor("#1AEF4444"));
+        bg.setCornerRadius(dp(16));
+        bg.setStroke(dp(1), Color.parseColor("#66EF4444"));
+        box.setBackground(bg);
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        blp.topMargin = dp(8);
+        content.addView(box, blp);
+        TextView help = text("Si el juego se congeló: lo cierra sin terminar tu sesión.", 13, MIST, false);
+        TextView btn = dangerChip("Cerrar el juego");
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44));
+        box.addView(btn, bp);
+        LinearLayout.LayoutParams hp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        hp.topMargin = dp(6);
+        box.addView(help, hp);
+        btn.setOnClickListener(v -> confirmClose(box));
+        return btn;
+    }
+
+    private void confirmClose(LinearLayout box) {
+        box.removeAllViews();
+        box.addView(text("¿Cerrar el juego?", 16, FROST, true));
+        TextView sub = text("Lo que no hayas guardado se pierde. Tu sesión sigue abierta y puedes volver a jugar enseguida.", 13, MIST, false);
+        LinearLayout.LayoutParams sl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        sl.topMargin = dp(4);
+        box.addView(sub, sl);
+        LinearLayout r = row();
+        TextView no = chip("Cancelar", false);
+        TextView yes = dangerChip("Sí, cerrar");
+        r.addView(no, new LinearLayout.LayoutParams(0, dp(42), 1f));
+        LinearLayout.LayoutParams yl = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        yl.leftMargin = dp(10);
+        r.addView(yes, yl);
+        LinearLayout.LayoutParams rl = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        rl.topMargin = dp(10);
+        box.addView(r, rl);
+        no.setOnClickListener(v -> resetClose(box));
+        yes.setOnClickListener(v -> doClose(box));
+        firstFocus = no; // con el mando: B o «Cancelar» vuelven atras sin cerrar nada
+        no.requestFocus();
+    }
+
+    private void resetClose(LinearLayout box) {
+        ViewGroup parent = (ViewGroup) box.getParent();
+        if (parent == null) return;
+        int i = parent.indexOfChild(box);
+        parent.removeView(box);
+        View first = buildCloseGame(); // se agrega al final: se mueve a su lugar
+        View nb = content.getChildAt(content.getChildCount() - 1);
+        content.removeView(nb);
+        content.addView(nb, i);
+        firstFocus = first;
+        first.requestFocus();
+    }
+
+    private void doClose(LinearLayout box) {
+        box.removeAllViews();
+        LinearLayout r = row();
+        ProgressBar spin = new ProgressBar(act);
+        r.addView(spin, new LinearLayout.LayoutParams(dp(26), dp(26)));
+        TextView st = text("Cerrando el juego…", 15, FROST, true);
+        LinearLayout.LayoutParams tl = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        tl.leftMargin = dp(10);
+        r.addView(st, tl);
+        box.addView(r);
+        // respaldo inmediato por el teclado de la transmision (no depende de internet ni de la API)
+        try { host.sendCloseGameKeys(); } catch (Exception ignored) { }
+        NovaApi api = NovaApi.get(act);
+        if (!api.isLoggedIn()) { act.runOnUiThread(this::close); return; }
+        api.get("/api/v1/accounts", (status, body) -> {
+            String acc = status == 200 && body instanceof JSONArray && ((JSONArray) body).length() > 0
+                    ? ((JSONArray) body).optJSONObject(0).optString("id") : "";
+            if (acc.isEmpty()) { act.runOnUiThread(() -> closeFailed(box, "No pudimos hablar con Nova Play, pero la consola recibió el atajo para cerrar el juego.")); return; }
+            api.post("/api/v1/accounts/" + acc + "/play/close-game", new JSONObject(), (s2, b2) -> act.runOnUiThread(() -> {
+                if (s2 == 200) close();
+                else closeFailed(box, s2 == 409 ? "No encontramos una sesión de juego abierta." : NovaApi.errorMessage(s2, b2));
+            }));
+        });
+    }
+
+    private void closeFailed(LinearLayout box, String msg) {
+        if (!isShowing()) return;
+        box.removeAllViews();
+        box.addView(text(msg, 14, FROST, false));
+        TextView again = dangerChip("Intentar de nuevo");
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(42));
+        lp.topMargin = dp(10);
+        box.addView(again, lp);
+        again.setOnClickListener(v -> doClose(box));
+        firstFocus = again;
+        again.requestFocus();
+    }
+
+    /** Boton rojo (accion que cierra algo): con foco del mando, borde cian como el resto. */
+    private TextView dangerChip(String label) {
+        TextView c = text(label, 15, Color.WHITE, true);
+        c.setGravity(Gravity.CENTER);
+        c.setPadding(dp(14), 0, dp(14), 0);
+        c.setFocusable(true);
+        c.setClickable(true);
+        StateListDrawable st = new StateListDrawable();
+        st.addState(new int[]{android.R.attr.state_focused}, pill(DANGER, CYAN));
+        st.addState(new int[]{}, pill(DANGER, Color.TRANSPARENT));
+        c.setBackground(st);
+        return c;
     }
 
     private void buildVideo() {

@@ -792,6 +792,26 @@ public class Game extends Activity implements SurfaceHolder.Callback,
 
     @Override public void showKeyboard() { toggleKeyboard(); }
 
+    /** Ctrl+Alt+Fin a la consola: su lanzador cierra SOLO el juego (respaldo de «Cerrar el juego» del panel, sin depender de la API). */
+    @Override
+    public void sendCloseGameKeys() {
+        if (conn == null) return;
+        final short ctrl = (short) 0x80A2, alt = (short) 0x80A4, end = (short) 0x8023; // VK_LCONTROL, VK_LMENU, VK_END (con prefijo 0x80)
+        final byte c = KeyboardPacket.MODIFIER_CTRL, ca = (byte) (KeyboardPacket.MODIFIER_CTRL | KeyboardPacket.MODIFIER_ALT);
+        new Thread(() -> {
+            try {
+                conn.sendKeyboardInput(ctrl, KeyboardPacket.KEY_DOWN, c, (byte) 0);
+                conn.sendKeyboardInput(alt, KeyboardPacket.KEY_DOWN, ca, (byte) 0);
+                conn.sendKeyboardInput(end, KeyboardPacket.KEY_DOWN, ca, (byte) 0);
+                Thread.sleep(80);
+                conn.sendKeyboardInput(end, KeyboardPacket.KEY_UP, ca, (byte) 0);
+                conn.sendKeyboardInput(alt, KeyboardPacket.KEY_UP, c, (byte) 0);
+                conn.sendKeyboardInput(ctrl, KeyboardPacket.KEY_UP, (byte) 0, (byte) 0);
+            } catch (Exception ignored) {
+            }
+        }).start();
+    }
+
     @Override public NovaStreamPanel.NovaAudioControl audio() { return novaAudioRenderer; }
 
     /** Vuelve a conectar con la MISMA consola y la calidad nueva: se corta esta transmision (sin cerrar el juego alla) y se abre otra. */
